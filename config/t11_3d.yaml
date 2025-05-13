@@ -1,0 +1,20 @@
+# model:
+#______for cnn_encoder_______
+input_size: [64,64,64]
+dims : 3
+model_name: ae
+architecture: ae2
+block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
+filters: [32,64,96]  # filters number can not be the same consecutively
+kernel_size: [5,5,3]
+in_planes: 1
+out_planes: 1 
+pad_mode: 'reflect'
+act_mode: 'elu'
+norm_mode: 'none'
+#_______for mlp_encoder_____
+mlp_filters: [96,48,24,12]
+
+#____for region_feature_extract___, is applied after cnn_encoder
+avg_pool_size: [2,8,8] 
+

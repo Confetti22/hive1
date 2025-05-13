@@ -1,0 +1,61 @@
+#test autoencoder of different kernel_size on 0.5 um  2d  data of nuclei 
+#0: testvsi_2d_ae: k533_f4_16_24
+#1: double_layer: k533_f4_8_16
+#2: single_k755: k755_f4_8_16
+#3: single_k15_9_5: k15_9_5_f4_8_16
+
+exp_name : "single_k15_9_5" #exp_name used to distinguish each run
+out: "vis_ae_out" #path to output directory
+
+# system:
+device: cuda
+gpu_ids: 0
+num_gpus: 1
+num_cpus: 2
+
+# model:
+#______for cnn_encoder_______
+input_size: [512,512]
+dims : 2
+model_name: ae
+architecture: ae2
+block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
+filters: [4,16,24]  # filters number can not be the same consecutively
+kernel_size: [5,3,3]
+in_planes: 1
+out_planes: 1 
+pad_mode: 'reflect'
+act_mode: 'elu'
+norm_mode: 'none'
+#_______for mlp_encoder_____
+mlp_filters: [24,18,12,8]
+avg_pool_size: None
+
+# loss:
+loss_name: l1 # for ae reconstruction loss 
+
+# trainer:
+trainer_name: 'trainer' #trainer to choose
+save_every: 50 #save frequency
+epoch: 1000
+fp16: false 
+
+# solver:
+optimizer: "adam"
+lr_scheduler_name: "cosine"
+lr_start: 5e-4
+lr_end: 5e-6
+weight_decay: 0.0
+lr_warmup: 10
+
+# dataset:
+e5: false 
+dataset_name: 'vsi_dataset'
+batch_per_gpu: 512
+num_workers: 0
+shuffle: true
+data_path_dir: "/home/confetti/data/wide_filed/vsi_train"
+valid_data_path_dir: "/home/confetti/data/wide_filed/vsi_eval"
+
+e5_data_path_dir: "/share/home/shiqiz/data/wide_filed/vsi_train"
+e5_valid_data_path_dir: "/share/home/shiqiz/data/wide_filed/vsi_eval"
