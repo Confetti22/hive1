@@ -9,8 +9,8 @@ import torch
 import os
 import random
 
-class VsiDataset(Dataset):
-    def __init__(self, args,valid=False,amount = 1):
+class SimpleDataset(Dataset):
+    def __init__(self, args,valid=False,use_ratio = 1):
         """
         amount : control the amount of data for training
         """
@@ -29,8 +29,8 @@ class VsiDataset(Dataset):
         # Collect files ending with `.tif`
         self.files = [os.path.join(current_path, fname) for fname in os.listdir(current_path) if fname.endswith('.tif')]
         random.shuffle(self.files)
-        self.files  = self.files[:int(amount*len(self.files))]
-        print(f"######init vsi_dataset with amount ={amount}, len of datset is {len(self.files)}#####")
+        self.files  = self.files[:int(use_ratio*len(self.files))]
+        print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files)}#####")
 
     def __len__(self):
  
@@ -39,12 +39,6 @@ class VsiDataset(Dataset):
 
     def __getitem__(self,idx) :
 
-        """
-        randomly sample a 3d image cube, get the corresponding upsample maskl
-        then decide whether use this cube to train 
-
-        then preprocess it and transform it
-        """
         roi = tif.imread(self.files[idx])
         roi = np.array(roi).astype(np.float32) 
 
@@ -52,37 +46,26 @@ class VsiDataset(Dataset):
         #     roi = self.clip_norm(roi,clip_low=self.clip_low,clip_high=self.clip_high)
         # else:
         #     roi =self.clip(roi,clip_low=self.clip_low,clip_high=self.clip_high)
-        roi=self.tran2tensor(roi)
-        # roi=torch.unsqueeze(roi,0)
+        roi=torch.from_numpy(roi)
+        roi=torch.unsqueeze(roi,0)
 
         return roi
     
 
-    @staticmethod 
-    def tran2tensor(img):
-        #using no augmentation at all
-        trans=v2.Compose(
-            [
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale = False),
-            ]
-        )
-        transed_img=trans(img)
-        return transed_img
 
 
 
 def get_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = VsiDataset(args, amount=1)
+    train_dataset = SimpleDataset(args, use_ratio=1)
 
     return train_dataset
 
 def get_valid_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = VsiDataset(args,valid=True,amount =0.2)
+    train_dataset = SimpleDataset(args,valid=True,use_ratio =0.2)
 
     return train_dataset
 

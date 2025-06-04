@@ -130,11 +130,12 @@ def make_block(in_ch, out_ch, ks, stride, padding, block_type, dim, trans, share
 
 class EncoderND(nn.Module):
     def __init__(self, in_channel, filters, kernel_size, dimension=3,
-                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None):
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None, avg_pool_padding=False):
         super().__init__()
         self.dim = dimension
         self.depth = len(filters)
         self.avg_pool_size = avg_pool_size
+        self.avg_pool_padding = avg_pool_padding
 
         Conv = nn.Conv3d if dimension == 3 else nn.Conv2d
 
@@ -166,7 +167,11 @@ class EncoderND(nn.Module):
 
         avg_pool_size = self.avg_pool_size
         if avg_pool_size:
-            pad = [int((x - 1)//2) for x in avg_pool_size]
+            
+            if self.avg_pool_padding:
+                pad = [int((x - 1)//2) for x in avg_pool_size]
+            else:
+                pad =0
             pool = nn.AvgPool3d(kernel_size=avg_pool_size, stride=1,padding=pad) if self.dim == 3 else nn.AvgPool2d(kernel_size=avg_pool_size, stride=1,padding=pad)
             x = pool(x)
         return x
@@ -283,10 +288,10 @@ class ConvMLP(nn.Module):
 
 class ComposedModel(nn.Module):
     def __init__(self, in_channel,cnn_filters, kernel_size,dims,mlp_filters, 
-                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size= None):
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size= None, avg_pool_padding=None):
         super().__init__()
         self.cnn_encoder = EncoderND(in_channel, cnn_filters, kernel_size, dims,
-                                 pad_mode, act_mode, norm_mode, block_type,avg_pool_size=avg_pool_size)
+                                 pad_mode, act_mode, norm_mode, block_type,avg_pool_size=avg_pool_size,avg_pool_padding =avg_pool_padding)
         self.mlp_encoder = ConvMLP(mlp_filters,dims)
 
     def forward(self, x):
@@ -309,21 +314,20 @@ MODEL_MAP = {
 
 def build_autoencoder_model(args):
 
-    model_arch = args.ARCHITECTURE
+    model_arch = args.model_name
     assert model_arch in MODEL_MAP.keys()
     kwargs = {
-        'in_channel': args.IN_PLANES,
-        'out_channel': args.OUT_PLANES,
-        'filters': args.FILTERS,
-        'kernel_size':args.kernel_size,
-        'pad_mode': args.PAD_MODE,
-        'act_mode': args.ACT_MODE,
-        'norm_mode': args.NORM_MODE,
-        'block_type': args.BLOCK_TYPE,
+        'in_channel': args.in_planes,
+        'out_channel': args.out_planes,
+        'filters': args.filters,
+        'kernel_size': args.kernel_size,
+        'pad_mode': args.pad_mode,
+        'act_mode': args.act_mode,
+        'norm_mode': args.norm_mode,
+        'block_type': args.block_type,
     }
 
-
-    model = MODEL_MAP[args.ARCHITECTURE](**kwargs)
+    model = MODEL_MAP[args.model_name](**kwargs)
     print('model: ', model.__class__.__name__)
 
     return model
@@ -358,6 +362,7 @@ def build_final_model(args):
         'dims':args.dims,
         'mlp_filters':args.mlp_filters,
         'avg_pool_size':args.avg_pool_size,
+        'avg_pool_padding':args.avg_pool_padding,
     }
     model = ComposedModel(**kwargs)
     return model
@@ -376,9 +381,16 @@ def delete_key(weight_dict,pattern_lst):
     return new_weight_dict 
 
 
-def load_cnnencoder_dict(model,ckpt_pth):
+def load_encoder2encoder(model,ckpt_pth):
     ckpt = torch.load(ckpt_pth)
-    model.load_state_dict(ckpt,strict=False)
+    removed_module_dict = modify_key(ckpt,source='module.',target='')
+    model.load_state_dict(removed_module_dict,strict=False)
+
+def load_ae2encoder(model,ckpt_pth):
+    ckpt = torch.load(ckpt_pth)
+    removed_module_dict = modify_key(ckpt['model'],source='module.encoder.',target='')
+    model.load_state_dict(removed_module_dict,strict=False)
+
 
 def load_mlpencoder_dict(model,ckpt_pth):
     ckpt = torch.load(ckpt_pth)
@@ -412,7 +424,7 @@ def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth,dims):
 def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth,dims=2):
     cnn = cmodel.cnn_encoder
     mlp = cmodel.mlp_encoder
-    load_cnnencoder_dict(cnn,cnn_ckpt_pth)
+    load_encoder2encoder(cnn,cnn_ckpt_pth)
     # load_mlpencoder_dict(mlp,mlp_ckpt_pth)
     load_mlp_ckpt_to_convmlp(mlp,mlp_ckpt_pth,dims)
     

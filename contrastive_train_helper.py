@@ -14,8 +14,68 @@ import random
 import numpy as np
 import tifffile as tif
 
+class Contrastive_dataset_3d(Dataset):
+    """
+    different from the old version "Constrastive_dataset"
+    old verion feats_map: C,D,H,W
+    new verion feats_map: D,H,W,C
+    """
+    def __init__ (self,feats_map,d_near,num_pairs,n_view = 2,verbose = False):
 
-class Contrastive_dataset(Dataset):
+        D,H,W,C= feats_map.shape
+        self.feats_map = feats_map
+        d_near = int(d_near//(2**3*0.5))
+
+        margin =10
+
+        # Generate random (x, y, z) locations within the given range
+        lx, hx = d_near + margin, D - d_near - margin
+        ly, hy = d_near + margin, H - d_near - margin
+        lz, hz = d_near + margin, W - d_near - margin
+
+        self.loc_lst = np.stack([
+            np.random.randint(lx, hx, size=num_pairs),
+            np.random.randint(ly, hy, size=num_pairs),
+            np.random.randint(lz, hz, size=num_pairs)
+        ], axis=1)
+
+        self.sample_num = num_pairs
+        self.all_near_shifts = generate_sphereshell__shifts(R= d_near,r= 0,dims=3)
+        self.n_view =n_view
+
+
+    def __len__(self):
+        return self.sample_num
+    
+    def __getitem__(self,idx):
+
+        z, y, x = self.loc_lst[idx].T    # Unpack coordinates
+        feat = self.feats_map[z, y, x,:]  # Shape: (C)
+        feat = torch.from_numpy(feat)
+        # for each call, the positive pair is resampled within the near_shifts range, 
+        # maybe fix the positive pair will be better for stable training
+        pair_locs = [self.positve_pair_loc_generate([z,y,x]) for _ in range(self.n_view -1)]
+        pair_feats = [self.get_feats_given_loc(pair_loc,self.feats_map) for pair_loc in pair_locs]
+        res = [feat]
+        for pair in pair_feats:
+            res.append(pair)
+
+        #res: x1,neigb1(x1),neigb2(x1),..,neigbN(x1)
+        return res
+
+    def get_feats_given_loc(self,loc,feat_map):
+    
+        z, y, x = loc   # Unpack coordinates
+
+        feats = feat_map[z, y, x,:] 
+        return feats 
+
+    def positve_pair_loc_generate(self,loc):
+        shift = random.choice(self.all_near_shifts)
+        return loc+shift
+
+
+class Contrastive_dataset_2d(Dataset):
     def __init__ (self,feats_map,d_near,n_view = 2,verbose = False):
 
         N,C,H,W = feats_map.shape

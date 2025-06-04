@@ -4,6 +4,8 @@ from magicgui import widgets
 from scipy.spatial.distance import pdist, squareform
 import zarr
 import time
+from tqdm.auto import tqdm
+import torch.nn.functional as F
 
 
 
@@ -72,7 +74,7 @@ def map2sample_space(mapped_seg_out,sample_shape,vol_start_idx,stride):
 
     return seg_out 
 
-def compute_seg(label_mask: np.ndarray, feature_map: np.ndarray, dist_matrix=None, spatail_decay=True,) -> np.ndarray:
+def _compute_seg(label_mask: np.ndarray, feature_map: np.ndarray, dist_matrix=None, spatail_decay=True,) -> np.ndarray:
     print(f"label_mask.shape {label_mask.shape}")
 
     unique_labels = np.unique(label_mask)
@@ -133,8 +135,78 @@ def replicate_nonzero_slices(arr, n):
     
     return arr_copy
 
+import torch
+import torch.nn as nn
 
-def seg(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
+class SegmentationHead(nn.Module):
+    def __init__(self, in_features, num_classes):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features, 12),
+            nn.ReLU(),
+            nn.Linear(12, num_classes)  # Multiclass logits
+        )
+
+    def forward(self, x):
+        return self.classifier(x)
+
+def _seg_via_mlp_head(user_mask, feature_map, num_epochs=100, lr=1e-3,return_prob = False):
+    """
+    Args:
+        user_mask: numpy of shape (D, H, W), where labeled voxels have integer class labels >= 0.
+        feature_map: numpy of shape (D, H, W, C)
+    
+    Returns:
+        predicted_mask: numpy of shape (D, H, W), with predicted class labels (int64)
+    """
+    device = 'cuda' 
+    D, H, W, C = feature_map.shape
+    feature_map = torch.from_numpy(feature_map)
+    user_mask = torch.from_numpy(user_mask)
+    # Get labeled coordinates and labels (ignore 0)
+    coords = torch.nonzero(user_mask > 0, as_tuple=False)  # [N, 3]
+    labels = user_mask[coords[:, 0], coords[:, 1], coords[:, 2]] - 1  # Convert to 0-based class index
+
+    num_classes = labels.max().item() + 1
+    if num_classes < 2:
+        raise ValueError("Need at least 2 labeled classes in the mask.")
+
+    z, y, x = coords[:, 0], coords[:, 1], coords[:, 2]
+    prompt_features = feature_map[z, y, x]  # [N, C]
+
+    head = SegmentationHead(C, num_classes).to(device)
+    optimizer = torch.optim.Adam(head.parameters(), lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
+
+    prompt_features =prompt_features.to(device)
+    prompt_labels = labels.to(device)
+
+    for epoch in tqdm(range(num_epochs)):
+        head.train()
+
+        optimizer.zero_grad()
+        logits = head(prompt_features)
+        loss = loss_fn(logits, prompt_labels)
+        loss.backward()
+        optimizer.step()
+        print(f"loss:{loss.item()}")
+
+    # Predict over full volume
+    flat_features = feature_map.reshape(-1, C).to(device)
+    with torch.no_grad():
+        head.eval()
+        logits = head(flat_features)  # [D*H*W, K]
+        probs = F.softmax(logits, dim=1)  # [D*H*W, K]
+
+    if return_prob:
+        prob_vol = probs.reshape(D, H, W, num_classes).permute(3, 0, 1, 2)  # [K, D, H, W]
+        return prob_vol.detach().cpu().numpy()
+    else:
+        pred_mask = torch.argmax(probs, dim=1).reshape(D, H, W) + 1  # Convert back to 1-based labels
+        return pred_mask.detach().cpu().numpy()
+
+
+def seg_by_computing_sim(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
 
     vol_start_idx = [ stride - (offset - lb)%stride for  offset,lb in zip(roi_offset,lb )]
 
@@ -155,14 +227,31 @@ def seg(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
     print(f"compute_dis_matrix: {time.time() - current}")
     current = time.time()
 
-    mapped_seg_out = compute_seg(label_mask = mapped_label,feature_map=target_feats_map, dist_matrix= dist_matrix, spatail_decay=True) 
+    mapped_seg_out = _compute_seg(label_mask = mapped_label,feature_map=target_feats_map, dist_matrix= dist_matrix, spatail_decay=True) 
+    print(f"compute seg time :{time.time() - current}")
+    seg_out = map2sample_space(mapped_seg_out,roi_size,vol_start_idx,stride)
+    return seg_out
+
+def seg_via_mlp_head(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
+
+    vol_start_idx = [ stride - (offset - lb)%stride for  offset,lb in zip(roi_offset,lb )]
+
+    # skipped the first stride cube (both imcompele and complete cube , cube is the roi when extrating feats)
+    #map label from sample space to feature space
+    processed_label = replicate_nonzero_slices(label,n=18)
+    mapped_label = processed_label[ vol_start_idx[0]::stride, vol_start_idx[1]::stride,vol_start_idx[2]::stride] 
+    mapped_label = mapped_label[:-1,:-1,:-1]
+    target_feats_map = get_target_feats_map(mapped_label.shape,roi_offset=roi_offset,lb=lb,stride=stride)
+
+    current = time.time()
+    mapped_seg_out = _seg_via_mlp_head(user_mask = mapped_label,feature_map=target_feats_map,num_epochs=2000,) 
     print(f"compute seg time :{time.time() - current}")
     seg_out = map2sample_space(mapped_seg_out,roi_size,vol_start_idx,stride)
     return seg_out
 
     
 
-class SimpleSeger(widgets.Container):
+class SimpleSeger2(widgets.Container):
     def __init__(self, viewer1: napari.Viewer, viewer2: napari.Viewer,simple_viewer):
         super().__init__()
 
@@ -234,7 +323,106 @@ class SimpleSeger(widgets.Container):
         roi_size = self.read_roi_size_from_simpleviewer()
 
         # need current roi_size and a lb related to pre_computed_feats_map
-        seg_out = seg(roi_offset,roi_size,label_data,self.lb,stride = 16)
+        seg_out = seg_by_computing_sim(roi_offset,roi_size,label_data,self.lb,stride = 16)
+        # seg_out = seg_via_mlp_head(roi_offset,roi_size,label_data,self.lb,stride = 16)
+        self.segout_layer.data = seg_out 
+
+        self.viewer1.layers.selection = [self.label_layer]  # Keep selected
+
+    def clear_labels(self,):
+        label_layer = self.label_layer
+        label_layer.data = np.zeros_like(label_layer.data)
+        self.segout_layer.data = np.zeros_like(label_layer.data)
+        self.viewer1.layers.selection = [label_layer]  # Keep selected
+
+    def undo_labels(self,):
+        label_layer = self.label_layer
+        label_layer.data = self.last_label_data 
+        self.segout_layer.data = self.last_seg_data 
+        self.viewer1.layers.selection = [label_layer]  # Keep selected
+    
+    def read_offset_from_simpleviewer(self):
+        return self.simple_viewer.get_roi_offset
+
+    def read_roi_size_from_simpleviewer(self):
+        return self.simple_viewer.get_roi_size
+
+
+
+
+class SimpleSeger1(widgets.Container):
+    def __init__(self, viewer1: napari.Viewer, viewer2: napari.Viewer,simple_viewer):
+        super().__init__()
+
+        self.simple_viewer = simple_viewer
+
+        stride = 16
+        whole_volume_offset =  [3392, 2512, 3504]
+        valid_offset = [ int(x + int((3/2) *stride)) for x in whole_volume_offset]
+        self.lb = valid_offset
+
+        current  = time.time()
+        roi_offset = [7500,5600,4850]
+        roi_size =[64,64,64]
+
+
+        label_data = np.zeros((roi_size),dtype=np.uint8)
+        self.viewer1 = viewer1
+
+        self.label_layer = self.viewer1.add_labels(label_data,name ='Label')
+        self.segout_layer = self.viewer1.add_labels(label_data,name = 'Segout')
+
+        self.last_seg_data = np.zeros((roi_size),dtype=np.uint8) 
+        self.last_label_data = np.zeros((roi_size),dtype=np.uint8)
+        self.current_label_data = np.zeros((roi_size),dtype=np.uint8)
+
+        self.label_layer.brush_size = 30
+        self.label_layer.mode = 'PAINT'
+        self.viewer1.layers.selection = [self.label_layer]  # Keep selected
+        
+        self.regiser_callbacks()
+
+        
+
+
+    def regiser_callbacks(self):
+        # --- Define separate buttons ---
+        self.simple_viewer.roi_layer.events.data.connect(self.prepare_seg)
+        self.seg_button = widgets.PushButton(text="Seg")
+        self.seg_button.clicked.connect(self.run_seg)
+        self.clear_button = widgets.PushButton(text="Clear")
+        self.clear_button.clicked.connect(self.clear_labels)
+        self.undo_button = widgets.PushButton(text="Undo")
+        self.undo_button.clicked.connect(self.undo_labels)
+
+        self.extend([
+            self.seg_button, 
+            self.clear_button,
+            self.undo_button,
+            ])
+
+    # --- Seg button action ---
+    def prepare_seg(self):
+        roi_size = self.read_roi_size_from_simpleviewer()
+        self.label_layer.data = np.zeros(roi_size,dtype=np.uint8)
+        self.segout_layer.data = np.zeros(roi_size,dtype=np.uint8)
+        self.current_label_data = np.zeros((roi_size),dtype=np.uint8)
+
+
+
+    def run_seg(self,):
+        label_data = self.label_layer.data.copy()
+        
+
+        self.last_label_data = self.current_label_data
+        self.current_label_data  = label_data
+        self.last_seg_data = self.segout_layer.data.copy() 
+
+        roi_offset =self.read_offset_from_simpleviewer()
+        roi_size = self.read_roi_size_from_simpleviewer()
+
+        # need current roi_size and a lb related to pre_computed_feats_map
+        seg_out = seg_by_computing_sim(roi_offset,roi_size,label_data,self.lb,stride = 16)
         self.segout_layer.data = seg_out 
 
         self.viewer1.layers.selection = [self.label_layer]  # Keep selected

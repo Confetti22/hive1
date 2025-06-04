@@ -2,7 +2,7 @@ import napari
 import numpy as np
 from magicgui import magicgui
 from helper.simple_viewer import SimpleViewer
-from helper.image_seger import SimpleSeger
+from helper.image_seger import SimpleSeger2
 from helper.napari_view_utilis import MultipleViewerWidget, toggle_layer_visibility
 
 ###### init main napari viewer ########
@@ -40,17 +40,10 @@ viewer2=viewer1.window._dock_widgets['multiViewer'].widget().viewer_model1
 # Display the slider as a dock widget at the bottom of the viewer
 # viewer1.window.add_dock_widget(adjust_z_index_wid, area='right', name='Z Controller')
 
-import weakref
-
-def on_destroy():
-    print("simple_viewer_widget was destroyed (garbage collected)")
 
 # Set up the watcher
 simple_viewer_widget = SimpleViewer(viewer1,viewer2)
-weakref.finalize(simple_viewer_widget, on_destroy)
-
-simple_seger_widegt = SimpleSeger(viewer1,viewer2,simple_viewer_widget)
-
+simple_seger_widegt = SimpleSeger2(viewer1,viewer2,simple_viewer_widget)
 
 @viewer2.bind_key('v')
 def toggle_mask_viewer2(_module):
@@ -60,6 +53,5 @@ def toggle_mask_viewer2(_module):
 
 viewer1.window.add_dock_widget(simple_viewer_widget,area='right')
 viewer1.window.add_dock_widget(simple_seger_widegt,area='left')
-
 
 napari.run()

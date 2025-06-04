@@ -50,7 +50,7 @@ lr_warmup: 10
 
 # dataset:
 e5: false 
-dataset_name: 'vsi_dataset'
+dataset_name: 'simple_dataset'
 batch_per_gpu: 512
 num_workers: 0
 shuffle: true

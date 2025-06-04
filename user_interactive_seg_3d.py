@@ -172,22 +172,22 @@ def seg(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
 #%%
 
 
-# level = 0
-# stride = 16
-# ims_vol = Ims_Image(ims_path="/home/confetti/e5_data/t1779/t1779.ims", channel=2)
-# raw_volume_size =ims_vol.rois[level][3:] #the data shape at r3 for test
-# print(f"raw_volume_size{raw_volume_size}")
-# whole_volume_size = [int(element//2) for element in raw_volume_size]
-# whole_volume_offset = [int(element//4) for element in raw_volume_size]
-# valid_offset = [ int(x + int((3/2) *stride)) for x in whole_volume_offset]
-# valid_size = [ int(x - int((3/2) *stride)) for x in whole_volume_size]
-# lb = valid_offset
-# hb = [ x+ y for x, y in zip(valid_offset,valid_size)] 
+level = 0
+stride = 16
+ims_vol = Ims_Image(ims_path="/home/confetti/e5_data/t1779/t1779.ims", channel=2)
+raw_volume_size =ims_vol.rois[level][3:] #the data shape at r3 for test
+print(f"raw_volume_size{raw_volume_size}")
+whole_volume_size = [int(element//2) for element in raw_volume_size]
+whole_volume_offset = [int(element//4) for element in raw_volume_size]
+valid_offset = [ int(x + int((3/2) *stride)) for x in whole_volume_offset]
+valid_size = [ int(x - int((3/2) *stride)) for x in whole_volume_size]
+lb = valid_offset
+hb = [ x+ y for x, y in zip(valid_offset,valid_size)] 
 
-# roi_offset = [7436,5600,4850]
-# roi_size =[128,1024,1024]
-# raw_img = ims_vol.from_roi(coords=[*roi_offset,*roi_size],level=0)
-# img_shape = raw_img.shape
+roi_offset = [7436,5600,4850]
+roi_size =[128,1024,1024]
+raw_img = ims_vol.from_roi(coords=[*roi_offset,*roi_size],level=0)
+img_shape = raw_img.shape
 #%%
 tif_path = '/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/LuZhonghua/CrabeatingMacaque_Brain_CM001/Reconstruction_/SliceImage/10.0/PBM_PFC_CMD47-050_090_640nm_10X.tif'
 tif_img = tif.imread(tif_path)

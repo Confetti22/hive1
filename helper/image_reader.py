@@ -3,10 +3,11 @@ import h5py
 import zarr
 import re
 from tifffile import imread
-
+import random
 
 class Ims_Image():
     '''
+    the old ims_reader
     ims image: [z,y,x]
     input roi and returned image: [z,y,x]
     '''
@@ -124,7 +125,7 @@ class Ims_Image():
             image_info = self.hdf.get('DataSetInfo')['Image'].attrs
             # calculate physical size
             extents = []
-            for k in ['ExtMin0', 'ExtMin1', 'ExtMin2', 'ExtMax0', 'ExtMax1', 'ExtMax2']:
+            for k in ['ExtMin2', 'ExtMin1', 'ExtMin0', 'ExtMax2', 'ExtMax1', 'ExtMax0']:
                 extents.append(eval(image_info[k]))
             dims_physical = []
             for i in range(3):
@@ -141,7 +142,7 @@ class Ims_Image():
             hdata_group = self.hdf['DataSet'][level]['TimePoint 0']['Channel 0']
             data = hdata_group['Data']
             dims_data = []
-            for k in ["ImageSizeX", "ImageSizeY", "ImageSizeZ"]:
+            for k in ["ImageSizeZ", "ImageSizeY", "ImageSizeX"]:
                 dims_data.append(int(eval(hdata_group.attrs.get(k))))
             if dims_physical == None:
                 dims_physical = dims_data
@@ -158,11 +159,103 @@ class Ims_Image():
                 }
             )
         return info
+    
+    def get_random_roi(self,
+                    filter=lambda x:np.mean(x)>=150,
+                    roi_size=(64,64,64),
+                    level=0,
+                    skip_gap = False,
+                    sample_range = None,
+                    margin = 128, #sampled roi will be within the interior of index 
+                    ):
+
+        """
+        random sample a roi of size (z_extend,y_extend,x_extend) that pass the filter check
+        return the start indexes
+        """
+        foreground_sample_flag=False
+        #shape: (z,y,x)
+        info=self.get_info()
+        sample_lb = [0,0,0]
+        sample_rb=info[level]['data_shape']
+        if sample_range:
+            sample_lb = [idx_range[0] for idx_range in sample_range]
+            sample_rb = [ idx_range[1] for idx_range in sample_range]
+
+        if skip_gap:
+            #for skipping the gap between slices
+            start = 5
+            step = 300
+            end = step - start - roi_size[0] 
+            limit = sample_rb[0]-roi_size[0] - margin 
+            intervals = []
+            
+            #add one step to skip the fist z slice
+            current_start = start + sample_lb[0]
+            current_end = end + sample_lb[0]
+        
+            # Generate intervals
+            while current_end <= limit:
+                intervals.append((current_start, current_end))
+                current_start += step
+                current_end += step
+        
+
+        while not foreground_sample_flag:
+
+            if skip_gap:
+                chosen_interval = random.choice(intervals)
+                z_idx = random.randint(chosen_interval[0],chosen_interval[1])
+            else:
+                z_idx=np.random.randint(sample_lb[0] + margin ,sample_rb[0]-roi_size[0] - margin) 
+            y_idx=np.random.randint(sample_lb[1] + margin ,sample_rb[1]-roi_size[1] - margin) 
+            x_idx=np.random.randint(sample_lb[2] + margin ,sample_rb[2]-roi_size[2] - margin) 
+            roi=self.from_roi(coords=[z_idx,y_idx,x_idx,roi_size[0],roi_size[1],roi_size[2]],level=level)
+            roi=roi.reshape(roi_size[0],roi_size[1],roi_size[2])
+            roi=np.squeeze(roi)
+            
+            #filter check
+            foreground_sample_flag=filter(roi)
+
+        return roi, [z_idx,y_idx,x_idx]
+    
+    def sample_within_range(
+                        self,
+                        center,
+                        radius,
+                        filter=lambda x:np.mean(x)>=150,
+                        roi_size=(64,64,64),
+                        level=0,
+                        skip_gap = False,
+                        margin = 128, #sampled roi will be within the interior of index 
+                        ):
+        foreground_sample_flag=False
+
+        idx_range = [ [idx - radius, idx + radius] for idx in center]
+
+        while not foreground_sample_flag:
+
+            z_idx = np.random.randint(idx_range[0][0],idx_range[0][1])
+            y_idx = np.random.randint(idx_range[1][0],idx_range[1][1])
+            x_idx = np.random.randint(idx_range[2][0],idx_range[2][1])
+        
+            roi=self.from_roi(coords=[z_idx,y_idx,x_idx,roi_size[0],roi_size[1],roi_size[2]],level=level)
+            roi=roi.reshape(roi_size[0],roi_size[1],roi_size[2])
+            roi=np.squeeze(roi)
+            
+            #filter check
+            foreground_sample_flag=filter(roi)
+        
+        sampled_idx = np.array([z_idx,y_idx,x_idx])
+        l2_dist = np.linalg.norm(sampled_idx - center)
+        print(f"sampled distance:{l2_dist}")
+        return roi , l2_dist
+
+
 
 class _Ims():
     '''
-    ims image: [z,y,x]
-    input roi and returned image: [x,y,z]
+    the new ims reader
     '''
     def __init__(self,ims_path):
         self.hdf = h5py.File(ims_path,'r')

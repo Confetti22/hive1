@@ -7,7 +7,7 @@ sys.path.insert(0, project_dir)
 import torch
 from lib.arch.ae import modify_key, delete_key
 from config.load_config import load_cfg
-from lib.arch.ae import build_final_model,build_encoder_model,load_compose_encoder_dict, load_cnnencoder_dict
+from lib.arch.ae import build_final_model,build_encoder_model,load_compose_encoder_dict, load_encoder2encoder
 from torchsummary import summary
 import tifffile as tif
 from confettii.plot_helper import kmeans_grid_results
@@ -55,7 +55,7 @@ plt.imshow(labels.reshape(H,W), cmap='tab20')
 args.avg_pool_size = None
 encoder_model = build_encoder_model(args,dims=3) 
 encoder_model.eval().to(device)
-load_cnnencoder_dict(encoder_model,cnn_ckpt_pth)
+load_encoder2encoder(encoder_model,cnn_ckpt_pth)
 cnn_out = encoder_model(input).cpu().detach().squeeze().numpy()
 print(cnn_out.shape)
 cnn_z0_slice = cnn_out[:,4,:,:]

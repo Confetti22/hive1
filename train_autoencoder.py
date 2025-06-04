@@ -11,6 +11,15 @@ from confettii.entropy_helper import entropy_filter
 import submitit, random, sys
 from pathlib import Path
 
+def auto_cast_config(config):
+    for k, v in config.items():
+        if isinstance(v, str):
+            try:
+                config[k] = float(v)
+            except ValueError:
+                pass
+    return config
+
 
 def parse_args():
 
@@ -24,7 +33,7 @@ def parse_args():
     parser.add_argument('-gpus', type=str, default="0",
                                             help='GPUs list, only works if not on slurm')
     parser.add_argument('-cfg', type =str,help='Configuration file',
-                        default='config/vsi_ae_2d.yaml')
+                        default='config/rm009.yaml')
 
     # === Trainer === #
 
@@ -57,6 +66,17 @@ def parse_args():
         with open(args.cfg, 'r') as f:
             import yaml
             yml = yaml.safe_load(f)
+        print(type(yml['lr_start']))  # should be <class 'float'>
+        # List of keys to convert
+        float_keys = ['lr_start', 'lr_end', 'weight_decay']
+        for key in float_keys:
+            if key in yml and isinstance(yml[key], str):
+                try:
+                    yml[key] = float(yml[key])
+                except ValueError:
+                    raise ValueError(f"Expected a float-convertible value for '{key}', got: {config[key]}")
+
+        print(type(yml['lr_start']))  # should be <class 'float'>
 
         # update values from cfg file only if not passed in cmdline
         cmd = [c[1:] for c in sys.argv if c[0]=='-']
@@ -118,7 +138,7 @@ def main():
 
     else:
         init_dist_node(args)
-        mp.spawn(train, args=(args), nprocs=args.ngpus_per_node)
+        mp.spawn(train, args=(args,), nprocs=args.ngpus_per_node)
 	
 
 def train(gpu, args):
@@ -156,7 +176,7 @@ def train(gpu, args):
     # === MODEL === #
     from torchsummary import summary
 
-    build_model_fn = getattr(__import__("lib.arch.{}".format(args.exp_name_name), fromlist=["build_autoencoder_model"]), "build_autoencoder_model")
+    build_model_fn = getattr(__import__("lib.arch.{}".format(args.architecture), fromlist=["build_autoencoder_model"]), "build_autoencoder_model")
     model = build_model_fn(args)
     model=model.cuda(args.gpu)
     model.train()
@@ -164,8 +184,7 @@ def train(gpu, args):
     
     #print out model info
     print(model)
-    summary(model,(1,512,512))
-    exit(0)
+    summary(model,(1,64,64,64))
 
     # model = nn.SyncBatchNorm.convert_sync_batchnorm(model) #group_norm did not require to sync, group_norm is preferred when batch_size is small
     model = nn.parallel.DistributedDataParallel(model, device_ids= [args.gpu],find_unused_parameters=True)

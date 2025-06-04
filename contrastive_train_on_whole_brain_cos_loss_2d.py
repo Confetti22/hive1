@@ -6,7 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from contrastive_train_helper_2d import cos_loss,valid,get_eval_data, MLP, Contrastive_dataset 
+from contrastive_train_helper import cos_loss,valid,get_eval_data, MLP, Contrastive_dataset_2d 
 import os
 #test whether pin zarr in memory will be faster
 
@@ -39,7 +39,7 @@ else:
 
 fp = np.memmap(raw_feats_pth, dtype='float32', mode='r+', shape=(8322, 24, 64,64))
 
-dataset = Contrastive_dataset(fp,d_near=d_near,n_view=n_views,verbose= True)
+dataset = Contrastive_dataset_2d(fp,d_near=d_near,n_view=n_views,verbose= True)
 dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle= True,drop_last= True)
 
 

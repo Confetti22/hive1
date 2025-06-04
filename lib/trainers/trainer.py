@@ -140,13 +140,17 @@ class Trainer:
                         tif.imwrite(os.path.join(self.recon_img_dir,x_name) , x)
                         tif.imwrite(os.path.join(self.recon_img_dir,re_x_name) , re_x)
 
-                        # x_x,x_y,x_z=get_three_slice(x)
-                        # re_x_x, re_x_y, re_x_z = get_three_slice(re_x)
-                        # merged_x = np.concatenate((x_x, x_y, x_z), axis=1)  
-                        # merged_re_x = np.concatenate((re_x_x, re_x_y, re_x_z), axis=1)  
-                        # merged = np.concatenate((merged_x,merged_re_x), axis=0)
-                        merged = np.concatenate((x,re_x),axis =0)
+                        three_dims = (len(preds.shape) ==4)
+                        if three_dims:
+                            x_x,x_y,x_z=get_three_slice(x)
+                            re_x_x, re_x_y, re_x_z = get_three_slice(re_x)
+                            merged_x = np.concatenate((x_x, x_y, x_z), axis=1)  
+                            merged_re_x = np.concatenate((re_x_x, re_x_y, re_x_z), axis=1)  
+                            merged = np.concatenate((merged_x,merged_re_x), axis=0)
+                        else:
+                            merged = np.concatenate((x,re_x),axis =0)
                         merged = (merged - merged.min()) / (merged.max() - merged.min())
+
                         self.writer.add_image('x and re_x ',merged,it,dataformats='HW')
 
 
@@ -187,6 +191,7 @@ class Trainer:
         pred_images = np.concatenate(pred_images,axis=0)
 
         
+        three_dims = (len(preds.shape) ==4)
         #B*D*H*W
         x_slices = []
         re_x_slices = []
@@ -198,10 +203,12 @@ class Trainer:
             re_x_name = f"{epoch:04d}_{idx:02d}_re_x.tif"
             tif.imwrite(os.path.join(self.valid_recon_img_dir,x_name) , x)
             tif.imwrite(os.path.join(self.valid_recon_img_dir,re_x_name) , re_x)
-            # x_slices.append(x[int(x.shape[0]//2),:,:])
-            # re_x_slices.append(re_x[int(re_x.shape[0]//2),:,:])
-            x_slices.append(x)
-            re_x_slices.append(re_x)
+            if three_dims:
+                x_slices.append(x[int(x.shape[0]//2),:,:])
+                re_x_slices.append(re_x[int(re_x.shape[0]//2),:,:])
+            else:
+                x_slices.append(x)
+                re_x_slices.append(re_x)
         x_slices = np.concatenate(x_slices,axis=1)
         re_x_slices = np.concatenate(re_x_slices,axis=1)
 
@@ -235,11 +242,11 @@ class Trainer:
             self.train_gen.sampler.set_epoch(epoch)
 
 
-            save_recon_img_flag = ( (epoch) %self.args.save_every==0)
+            save_recon_img_flag = ( (epoch +1 ) %self.args.save_every==0)
             self.train_one_epoch(epoch, lr_schedule,save_recon_img_flag,MSE_loss=True)
 
             # === eval and save model === #
-            if self.args.main and (epoch)% self.args.save_every == 0:
+            if self.args.main and (epoch + 1)% self.args.save_every == 0:
                 self.valid(epoch)
                 self.save(epoch)
             
@@ -257,7 +264,6 @@ class Trainer:
             self.start_epoch = ckpt['epoch']
             self.model.load_state_dict(ckpt['model'])
             self.optimizer.load_state_dict(ckpt['optimizer'])
-            if self.args.fp16: self.fp16_scaler.load_state_dict(ckpt['fp16_scaler'])
             print("Loaded ckpt: ", ckpts[-1])
 
         else:
@@ -267,18 +273,9 @@ class Trainer:
 
     def save(self, epoch):
 
-        if self.args.fp16:
-            state = dict(epoch=epoch+1, 
-                            model=self.model.state_dict(), 
-                            optimizer=self.optimizer.state_dict(), 
-                            fp16_scaler = self.fp16_scaler.state_dict(),
-                            args = self.args
-                        )
-        else:
-            state = dict(epoch=epoch+1, 
+        state = dict(epoch=epoch+1, 
                             model=self.model.state_dict(), 
                             optimizer=self.optimizer.state_dict(),
-                            args = self.args
                         )
 
         torch.save(state, "{}/weights/{}/Epoch_{}.pth".format(self.args.out, self.args.exp_name, str(epoch+1).zfill(3) ))

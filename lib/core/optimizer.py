@@ -7,4 +7,4 @@ def get_optimizer(model, args):
         'sgd': Opt.SGD(model.parameters(), lr = args.lr_start, weight_decay=args.weight_decay),
         'adagrad': Opt.Adagrad(model.parameters(), lr = args.lr_start, weight_decay=args.weight_decay)
     }
-    return opt_fns.get(args.solver_name, "Invalid Optimizer")
+    return opt_fns.get(args.optimizer, "Invalid Optimizer")
