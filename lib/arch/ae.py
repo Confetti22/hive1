@@ -166,7 +166,8 @@ class EncoderND(nn.Module):
         x = self.last_encoder_conv(x)
 
         avg_pool_size = self.avg_pool_size
-        if avg_pool_size:
+        apply_avg_flag = avg_pool_size[0]
+        if apply_avg_flag:
             
             if self.avg_pool_padding:
                 pad = [int((x - 1)//2) for x in avg_pool_size]

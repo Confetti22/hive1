@@ -12,6 +12,79 @@ from confettii.feat_extract import get_feature_list,get_feature_map,TraverseData
 from confettii.plot_helper import three_pca_as_rgb_image 
 from torch.utils.data import DataLoader
 from scipy.ndimage import gaussian_filter
+
+
+def plot_similarity(sample_feat, candidate_feat, llen, rlen, roi,roi_feats, metric, ulen,dlen,title='plot'):
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    similarities = []
+    for cand in candidate_feat:
+        sim = compute_similarity(np.array(sample_feat), np.array(cand), metric=metric)
+        similarities.append(sim)
+    
+    if metric == 'euclidean':
+        max_dis = max(similarities)
+        score = 1 - (similarities/max_dis)
+        similarities =  score
+
+    x_positions = np.arange(-llen, rlen + 1)
+
+    fig, axs = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [0.5, 1]}, sharex=True)
+
+    # Plot similarity curve
+    abs_similarities = np.abs(similarities)  # take absolute value
+    axs[0].plot(x_positions, abs_similarities, marker='o', markersize=2, label=f'|Similarity| ({metric})')
+    axs[0].axvline(x=0, color='r', linestyle='--', label='Sample (x=0)')
+    # axs[0].set_ylim([0, 1])  # y-axis from 0 to 1
+    axs[0].set_ylabel('Absolute Similarity')
+    axs[0].set_title(f'Similarity_Plot_{title}')
+    axs[0].legend(loc='upper left')
+    axs[0].grid(False)
+    axs[0].set_xlim([-llen, rlen + 1])
+
+    # Display ROI image with equal scaling
+    extent = [-llen, rlen + 1, -ulen, dlen + 1]
+    roi = roi[::-1,:]
+    roi_feats = roi_feats[::-1,:]
+    axs[1].imshow(roi, cmap='gray', extent=extent)
+    axs[1].imshow(roi_feats, alpha=0.39, extent=extent) 
+
+    norm_similarities = np.clip(abs_similarities, 0, 1)
+
+    # Map abs similarities to colors (0 → blue, 1 → red)
+    cmap = plt.get_cmap('coolwarm')  # blue to red
+    colors = cmap(norm_similarities)  # already 0 to 1 range
+
+    # Overlay thinner color-coded horizontal line (y=0)
+    for x, color in zip(x_positions, colors):
+        axs[1].plot(x, 0, marker='s', color=color, markersize=1)  # Thinner markers (smaller size)
+
+    # Plot white hollow circle at (0,0)
+    axs[1].plot(0, 0, marker='o', markerfacecolor='none', markeredgecolor='white', markersize=3, markeredgewidth=1.5)
+
+    axs[1].set_xlabel('Relative x')
+    axs[1].set_ylabel('Relative y')
+    # axs[1].set_title('Candidate Overlay with Similarity Line')
+
+    axs[1].set_aspect('equal', adjustable='box')  # Ensure equal scaling
+    axs[1].invert_yaxis()
+
+    plt.tight_layout()
+    plt.show()
+
+def compute_similarity(vec1, vec2, metric='cos'):
+    if metric == 'cos':
+        return cosine_similarity(vec1.reshape(1, -1), vec2.reshape(1, -1))[0, 0]
+    elif metric == 'euclidean':
+        e_distances = euclidean_distances(vec1.reshape(1, -1), vec2.reshape(1, -1))[0, 0]  
+        return e_distances
+    else:
+        raise ValueError(f"Unsupported metric: {metric}")
+
+
+
+
 class OneDimStatis(widgets.Container):
     def __init__(self, viewer:napari.Viewer, image_layer,featsmap_dict:dict):
         super().__init__()
@@ -143,76 +216,7 @@ class OneDimStatis(widgets.Container):
 
         title = f"feat_{feats_type}_loc{P_i}"
 
-        self.plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi, roi_feats=roi_feats,metric =metric,ulen=ulen,dlen=dlen,title= title)
-
-
-    def plot_similarity(self, sample_feat, candidate_feat, llen, rlen, roi,roi_feats, metric, ulen,dlen,title='plot'):
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        similarities = []
-        for cand in candidate_feat:
-            sim = self.compute_similarity(np.array(sample_feat), np.array(cand), metric=metric)
-            similarities.append(sim)
-        
-        if metric == 'euclidean':
-            max_dis = max(similarities)
-            score = 1 - (similarities/max_dis)
-            similarities =  score
-
-        x_positions = np.arange(-llen, rlen + 1)
-
-        fig, axs = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [0.5, 1]}, sharex=True)
-
-        # Plot similarity curve
-        abs_similarities = np.abs(similarities)  # take absolute value
-        axs[0].plot(x_positions, abs_similarities, marker='o', markersize=2, label=f'|Similarity| ({metric})')
-        axs[0].axvline(x=0, color='r', linestyle='--', label='Sample (x=0)')
-        # axs[0].set_ylim([0, 1])  # y-axis from 0 to 1
-        axs[0].set_ylabel('Absolute Similarity')
-        axs[0].set_title(f'Similarity_Plot_{title}')
-        axs[0].legend(loc='upper left')
-        axs[0].grid(False)
-        axs[0].set_xlim([-llen, rlen + 1])
-
-        # Display ROI image with equal scaling
-        extent = [-llen, rlen + 1, -ulen, dlen + 1]
-        roi = roi[::-1,:]
-        roi_feats = roi_feats[::-1,:]
-        axs[1].imshow(roi, cmap='gray', extent=extent)
-        axs[1].imshow(roi_feats, alpha=0.39, extent=extent) 
-
-        norm_similarities = np.clip(abs_similarities, 0, 1)
-
-        # Map abs similarities to colors (0 → blue, 1 → red)
-        cmap = plt.get_cmap('coolwarm')  # blue to red
-        colors = cmap(norm_similarities)  # already 0 to 1 range
-
-        # Overlay thinner color-coded horizontal line (y=0)
-        for x, color in zip(x_positions, colors):
-            axs[1].plot(x, 0, marker='s', color=color, markersize=1)  # Thinner markers (smaller size)
-
-        # Plot white hollow circle at (0,0)
-        axs[1].plot(0, 0, marker='o', markerfacecolor='none', markeredgecolor='white', markersize=3, markeredgewidth=1.5)
-
-        axs[1].set_xlabel('Relative x')
-        axs[1].set_ylabel('Relative y')
-        # axs[1].set_title('Candidate Overlay with Similarity Line')
-
-        axs[1].set_aspect('equal', adjustable='box')  # Ensure equal scaling
-        axs[1].invert_yaxis()
-
-        plt.tight_layout()
-        plt.show()
-
-    def compute_similarity(self,vec1, vec2, metric='cos'):
-        if metric == 'cos':
-            return cosine_similarity(vec1.reshape(1, -1), vec2.reshape(1, -1))[0, 0]
-        elif metric == 'euclidean':
-            e_distances = euclidean_distances(vec1.reshape(1, -1), vec2.reshape(1, -1))[0, 0]  
-            return e_distances
-        else:
-            raise ValueError(f"Unsupported metric: {metric}")
+        plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi, roi_feats=roi_feats,metric =metric,ulen=ulen,dlen=dlen,title= title)
 
 
 class OneDimStatis_dask_array(widgets.Container):
@@ -415,10 +419,11 @@ class OneDimStatis_dask_array(widgets.Container):
         hdb =  P_i[2] + dlen + 1
 
         roi = self.image_layer.data[z, hub:hdb, wlb:wrb] 
+        roi_feats = zoomed_rgb_feats_map[hub:hdb, wlb:wrb]
 
         title = f"feat_{feats_type}_loc{P_i}"
 
-        self.plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi, metric =metric,ulen=ulen,dlen=dlen,title= title)
+        plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi,roi_feats=roi_feats,metric =metric,ulen=ulen,dlen=dlen,title= title)
 
     
 
@@ -519,7 +524,7 @@ class OneDimStatis_roi(widgets.Container):
         stride = 16 
         dataset = TraverseDataset3d(mlp_roi,stride=16,win_size=(64,64,64),verbose=True) 
         roi_nums = dataset.get_sample_shape()
-        loader = DataLoader(dataset,batch_size=512,shuffle=None,drop_last=False) 
+        loader = DataLoader(dataset,batch_size= 256,shuffle=None,drop_last=False) 
         #shpae of feats_map should be (h,w,c)
         mlp_feats_list = get_feature_list('cuda',mlp_model,loader) 
         self.mlp_feats= mlp_feats_list.reshape(roi_nums[1],roi_nums[2],-1)
@@ -628,7 +633,8 @@ class OneDimStatis_roi(widgets.Container):
         roi = self.image_layer.data[z, hub:hdb, wlb:wrb] 
 
         title = f"feat_{feats_type}_loc{P_i}"
+        roi_feats = zoomed_rgb_feats_map[hub:hdb, wlb:wrb]
 
-        self.plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi, metric =metric,ulen=ulen,dlen=dlen,title= title)
+        plot_similarity(sample_feat,target_feats_s,llen=llen ,rlen=rlen,roi = roi, roi_feats=roi_feats,metric =metric,ulen=ulen,dlen=dlen,title= title)
 
     

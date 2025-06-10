@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/share/home/shiqiz/workspace/hive/contrastive_train_on_whole_brain_cos_loss_one_stage.py", line 91, in <module>
+    loss,pos_cos,neg_cos = cos_loss(features=out,batch_size=batch_size,n_views=n_views,pos_weight_ratio=pos_weight_ratio)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/shiqiz/workspace/hive/contrastive_train_helper.py", line 292, in cos_loss
+    cos_similarity_matrix = cos_similarity_matrix[~mask].view(cos_similarity_matrix.shape[0], -1)
+                            ~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+IndexError: The shape of the mask [256, 256] at index 0 does not match the shape of the indexed tensor [254, 254] at index 0

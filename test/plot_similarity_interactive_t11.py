@@ -12,15 +12,16 @@ from confettii.plot_helper import grid_plot_list_imgs
 import time
 device ='cuda'
 print(f'{os.getcwd()}=')
-args = load_cfg('config/t11_3d.yaml')
+args = load_cfg('config/rm009.yaml')
 
-args.avg_pool_size = (8,8,8) 
+avg_pool =8 
+args.avg_pool_size = [avg_pool]*3
 args.avg_pool_padding =  False
 
 cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
-cnn_ckpt_pth = '/home/confetti/data/weights/t11_3d_ae_best2.pth'
-mlp_ckpt_pth ='/home/confetti/data/weights/t11_3d_mlp_best_new_format.pth'
+cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
+mlp_ckpt_pth ='/home/confetti/e5_workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_2049.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
 encoder_model = build_encoder_model(args,dims=3) 
@@ -34,12 +35,19 @@ import torch
 from lib.utils.preprocess_img import pad_to_multiple_of_unit
 import numpy as np
 import matplotlib.pyplot as plt
-vol = tif.imread('/home/confetti/data/t1779/test_data_part_brain/0003.tif')
+vol = tif.imread('/home/confetti/data/rm009/seg_valid/001_cortex.tiff')
 zoom_factor= 8
 print(f"{vol.shape= }")
-vol = pad_to_multiple_of_unit(vol,unit=zoom_factor) 
+# vol = pad_to_multiple_of_unit(vol,unit=zoom_factor) 
 print(f"after padding: {vol.shape= }")
-img = vol[32]
+mask = tif.imread('/home/confetti/data/rm009/seg_valid/001_cortex_mask.tiff')
+
+# vol = vol[:,432:1100,206:1329]
+# mask = mask[:,432:1100,206:1329]
+
+mask_slice = mask[32]
+
+batch_size = 512 
 
 #%%
 import torch
@@ -57,6 +65,7 @@ incep_model.to(device)
 
 
 # Load and preprocess an image
+img = vol[32]
 normalized_img = ((img/ img.max()) * 255).astype(np.uint8)
 rgb_img = np.stack([normalized_img] * 3, axis=-1)
 print(f"{rgb_img.shape=}")
@@ -89,7 +98,7 @@ from torch.utils.data import DataLoader
 dataset = TraverseDataset2d(rgb_img,stride=8,win_size=128)
 out_shape = dataset._get_sample_shape()
 print(out_shape)
-loader = DataLoader(dataset,batch_size=512,shuffle=None,drop_last=False) 
+loader = DataLoader(dataset,batch_size= batch_size,shuffle=None,drop_last=False) 
 current = time.time()
 extract_layer_name ='avgpool'
 feats_list = get_feature_list(device,incep_model,loader,extract_layer_name=extract_layer_name)
@@ -114,11 +123,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from helper.one_dim_statis import OneDimStatis
 from scipy.ndimage import gaussian_filter
+from confettii.plot_helper import get_smooth_contours, get_boundary_via_erosion
 
-
+smoothed_contours = get_smooth_contours(mask_slice,min_contour_point_num=400)
 
 viewer = napari.Viewer()
-img_layer = viewer.add_image(vol[32],contrast_limits=[0,4000])
+label_layer = viewer.add_labels(mask_slice,name='gt')
+img_layer = viewer.add_image(vol[32],contrast_limits=[0,3000])
+# Add smoothed contours as paths
+viewer.add_shapes(
+    smoothed_contours,
+    shape_type='path',  # use 'polygon' if contours are closed loops
+    edge_color='red',
+    edge_width=1,
+    name='Contours'
+)
 
 blurred_image = gaussian_filter(vol[32,], sigma=12,mode='reflect')
 middle_mlp_feat = np.moveaxis(mlp_out,0,-1)

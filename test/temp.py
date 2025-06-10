@@ -41,3 +41,53 @@ lenght = int(feats_lst.shape[0]**0.5)
 feats_map = feats_lst.reshape(lenght,lenght,feats_lst.shape[-1])
 print(feats_map.shape)
 plt.imshow(feats_map.std(axis=-1))
+#%%
+import SimpleITK as sitk
+
+# Load the image
+image = sitk.ReadImage('/home/confetti/data/rm009/rm009_roi/all-z64800-65104/All-Z64800-65104.mha')
+print("Size:", image.GetSize())          # (x, y, z)
+#%%
+save_path = '/home/confetti/data/rm009/seg_valid'
+
+# Define starting index and size for cropping
+start = [1190,776,0]            # starting at origin
+size = [1536,1536,64]          # ROI size
+
+# Crop the image
+roi = sitk.RegionOfInterest(image, size=size, index=start)
+# Save as a multipage TIFF file (3D volume)
+sitk.WriteImage(roi, f"{save_path}/001_cortex_mask.tiff")
+# %%
+import tifffile as tif
+img = tif.imread("/home/confetti/data/rm009/rm009_roi/z16200_z16276C4.tif")
+roi = img[0:64, 776:776+1536, 1190:1190+1536]
+tif.imwrite(f"{save_path}/001_cortex.tiff",roi)
+
+
+# %%
+
+import os
+import re
+import time
+current = time.time()
+for i in [2,3,4]:
+    dir_a = f'/home/confetti/e5_data/t1779/knn/64_roi_{i}'  # <-- Change this to your directory path
+
+    for fname in os.listdir(dir_a):
+        if fname.endswith('.tif'):
+            base, ext = os.path.splitext(fname)
+            if re.fullmatch(r'\d{4}', base):
+                new_name = f"00{base}{ext}"
+            elif re.fullmatch(r'\d{5}', base):
+                new_name = f"0{base}{ext}"
+            else:
+                continue  # skip files that don't match the expected pattern
+            old_path = os.path.join(dir_a, fname)
+            new_path = os.path.join(dir_a, new_name)
+            print(f"Renaming {fname} -> {new_name}")
+            os.rename(old_path, new_path)
+print(f"finished! time: {time.time()-current}")
+
+
+# %%

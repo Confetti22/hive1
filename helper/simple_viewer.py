@@ -4,7 +4,7 @@ from magicgui import magicgui, widgets
 import tifffile as tif
 from helper.image_reader import wrap_image
 from helper.visulized_fibertract import filter_mask_given_acronym_lst, compute_cuboid_roi, compute_annotation
-from helper.napari_view_utilis import save_remove_layer_given_full_name, toggle_layer_visibility
+from helper.napari_view_utilis import safe_remove_layer_given_full_name, toggle_layer_visibility
 import time
 from scipy.ndimage import zoom
 
@@ -18,6 +18,8 @@ class SimpleViewer2(widgets.Container):
         self.paras = {
             'img_pth': "/home/confetti/e5_data/t1779/t1779.ims",
             'stack_dir':"/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Mouse_Brain/20210131_ZSS_USTC_THY1-YFP_1779_1/Reconstruction_1.0/Reconstruction/BrainImage/1.0/",
+            # 'stack_dir':"/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/RM009_all_/ROIImage/4.0",
+            # 'stack_dir':"/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009/LGN-V1-ROI1-1um/ROIImage/1.0",
             'mask_pth': "/home/confetti/e5_data/t1779/register_data/r32_ims_downsample_561_register/registered_atlas.tiff",
             'mlp_feats_pth':"",
             'atlas_vs':25,  #for image from resoluton d: vs(img_rd)=2**d
@@ -36,10 +38,8 @@ class SimpleViewer2(widgets.Container):
 
         #for viewer1
         self.viewer1= viewer1
-
-
-        
-        self.roi_layer = viewer1.add_image(np.zeros((32,32,32),dtype =np.uint16),name ='roi')
+        self.roi_layer = viewer1.add_image(np.zeros((3,3,3),dtype =np.uint16),name ='roi')
+        self.v1_reg_msk_ly = viewer1.add_labels(np.zeros((3,3,3),dtype = np.uint16),name='aux_mask',opacity =self.paras['opacity'])
 
     
 
@@ -50,7 +50,7 @@ class SimpleViewer2(widgets.Container):
 
         dask_arr = da.zeros((8,8,8), chunks=(2,2,2))
         self.aux_slice_layer = viewer2.add_image(dask_arr,name='aux_slice',contrast_limits=[0, 4000], multiscale=False)
-        self.aux_mask_layer = viewer2.add_labels(np.zeros((32,32),dtype = np.uint16),name='aux_mask',opacity =self.paras['opacity'])
+        self.aux_mask_layer = viewer2.add_labels(np.zeros((3,3),dtype = np.uint16),name='aux_mask',opacity =self.paras['opacity'])
         dummpy_polygon = np.array([
             [1,1],
             [1,1],
@@ -95,7 +95,7 @@ class SimpleViewer2(widgets.Container):
         self.button0 = widgets.PushButton(text="refresh")
         self.button0.clicked.connect(self.refresh)
 
-        self.region_input = widgets.LineEdit(value='STN')
+        self.region_input = widgets.LineEdit(value='SPVC')
         self.submit_button = widgets.PushButton(text="Submit")
         self.submit_button.changed.connect(self.get_target_region)
         # Group them in one horizontal line
@@ -148,6 +148,8 @@ class SimpleViewer2(widgets.Container):
         )
         self.show_anno_dropdown.changed.connect(self.on_acronym_changed)
         self.user_hints = widgets.TextEdit(label='Hints')
+        self.recomopute_anno = widgets.Button(text='recompute anno')
+        self.recomopute_anno.clicked.connect(self.recompute_anno)
 
                 
         self.extend([
@@ -162,10 +164,12 @@ class SimpleViewer2(widgets.Container):
             self.channel_dropdown,
             self.v1_resol_dropdown,
             self.show_anno_dropdown,
-            self.user_hints,
+            # self.user_hints,
+            self.recomopute_anno,
         ])
 
         self.img_pth_input.set_value(self.paras['img_pth'])
+
 
 
     def on_image_reading(self):
@@ -186,7 +190,7 @@ class SimpleViewer2(widgets.Container):
 
         resolution_levels = self.image.resolution_levels
         channels = self.image.channels
-        channel_idx =2
+        channel_idx =1
         self.channel_dropdown.changed.disconnect(self.on_channel_change)
         self.channel_dropdown.choices = channels
         self.channel_dropdown.value = channels[channel_idx]
@@ -216,12 +220,16 @@ class SimpleViewer2(widgets.Container):
             return
 
         roi_offset = [int(float(self.z.value)) ,int(float(self.y.value)), int(float(self.x.value))]
+        # roi_size = [
+        #             min(int(self.z_size.value), 128),
+        #             min(int(self.y_size.value), 1536),
+        #             min(int(self.x_size.value), 1536)
+        #         ]
         roi_size = [
-                    min(int(self.z_size.value), 128),
-                    min(int(self.y_size.value), 1536),
-                    min(int(self.x_size.value), 1536)
+                    int(self.z_size.value),
+                    int(self.y_size.value), 
+                    int(self.x_size.value), 
                 ]
-
         self.add_data_given_offset_size(roi_offset,roi_size)
 
 
@@ -358,6 +366,16 @@ class SimpleViewer2(widgets.Container):
         self.roi_layer.data = roi
         self.roi_layer.contrast_limits = (0,np.percentile(roi,99)+600)
 
+
+        # add mask
+        mask ,lr_mask= self.get_mask_from_different_scale(
+                                                                target_indexs=v1_roi_offset,
+                                                                target_roi_size=v1_roi_size,
+                                                                scale= self.paras['atlas_vs']/ (2** v1_level_int),
+                                                                return_ori_scale_img=True,
+                                                                )
+        self.v1_reg_msk_ly.data = mask
+
         self.viewer1.camera.zoom = 0.7
         self.viewer1.camera.center=(0,v1_roi_size[1],v1_roi_size[2])
         print(f" finishe v1 refresh, {time.time()- current:.3f}")
@@ -368,14 +386,11 @@ class SimpleViewer2(widgets.Container):
         roi_size = (int(self.z_size.value), int(self.y_size.value), int(self.x_size.value))
         self.middle_z_idx=roi_offset[0]+roi_size[0]//2
 
-        
-
 
         v2_level_int = 0
         v2_roi_offset = [int(x/(2**v2_level_int)) for x in roi_offset]
         v2_roi_size= [max(int(x/(2**v2_level_int)) ,1)for x in roi_size]
         v2_z_idx = v2_roi_offset[0] + int( v2_roi_size[0]//2)
-
 
         current = time.time()
         channel_str,channel_int = self.get_str_and_int_from_widget_channel_level(self.channel_dropdown.value)
@@ -391,29 +406,47 @@ class SimpleViewer2(widgets.Container):
         # self.aux_slice_layer.contrast_limits = (0,np.percentile(aux_z_slice,99)+600)
 
 
-        #add slice_mask
+        # add slice_mask
 
-        # v2_slice_shape=self.image.rois[v2_level_int][-2:]
-        # slice_mask ,lr_slice_mask= self.get_mask_from_different_scale(
-        #                                                         target_indexs=[v2_z_idx,0,0],
-        #                                                         target_roi_size=[1,*v2_slice_shape],
-        #                                                         scale= self.paras['atlas_vs']/ (2** v2_level_int),
-        #                                                         return_ori_scale_img=True,
-        #                                                         )
-        # self.lr_slice_mask = lr_slice_mask                                                   
-        # self.aux_mask_layer.data = slice_mask
+        v2_slice_shape=self.image.rois[v2_level_int][-2:]
+        slice_mask ,lr_slice_mask= self.get_mask_from_different_scale(
+                                                                target_indexs=[v2_z_idx,0,0],
+                                                                target_roi_size=[1,*v2_slice_shape],
+                                                                scale= self.paras['atlas_vs']/ (2** v2_level_int),
+                                                                return_ori_scale_img=True,
+                                                                )
+        self.lr_slice_mask = lr_slice_mask                                                   
+        self.aux_mask_layer.data = slice_mask
 
         #add roi_border
         self.add_roi_border_in_v2(v2_roi_offset,v2_roi_size)
 
         #add acronym
-        # self.on_acronym_changed()
+        self.on_acronym_changed()
+
         print(f"finished v2 refresh, time consumed: {time.time() - begin}")
             #adjust camera in sub_viewer
         self.viewer2.camera.zoom=1.3
         self.viewer2.camera.center=(0,v2_roi_offset[1],v2_roi_offset[2])
 
 
+    def recompute_anno(self):
+        begin = time.time()
+        v2_level_int = 0
+        cs = list(self.viewer2.dims.current_step)
+        v2_z_idx = cs[0]
+
+        v2_slice_shape=self.image.rois[v2_level_int][-2:]
+        slice_mask ,lr_slice_mask= self.get_mask_from_different_scale(
+                                                                target_indexs=[v2_z_idx,0,0],
+                                                                target_roi_size=[1,*v2_slice_shape],
+                                                                scale= self.paras['atlas_vs']/ (2** v2_level_int),
+                                                                return_ori_scale_img=True,
+                                                                )
+        self.lr_slice_mask = lr_slice_mask                                                   
+        self.aux_mask_layer.data = slice_mask
+        self.on_acronym_changed()
+        print(f"finished v2 refresh, time consumed: {time.time() - begin}")
 
 
 
@@ -423,11 +456,11 @@ class SimpleViewer2(widgets.Container):
         acronym_mode = self.show_anno_dropdown.value
 
         if acronym_mode == 'None':
-            save_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
+            safe_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
             return
 
         else:
-            save_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
+            safe_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
             if acronym_mode =='all':
                 target_mask = self.lr_slice_mask 
             else:
@@ -528,7 +561,7 @@ class SimpleViewer(widgets.Container):
         self.button0 = widgets.PushButton(text="refresh")
         self.button0.clicked.connect(self.refresh)
 
-        self.region_input = widgets.LineEdit(value='STN')
+        self.region_input = widgets.LineEdit(value='PSV')
         self.submit_button = widgets.PushButton(text="Submit")
         self.submit_button.changed.connect(self.get_target_region)
         # Group them in one horizontal line
@@ -835,11 +868,11 @@ class SimpleViewer(widgets.Container):
         acronym_mode = self.show_anno_dropdown.value
 
         if acronym_mode == 'None':
-            save_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
+            safe_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
             return
 
         else:
-            save_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
+            safe_remove_layer_given_full_name(self.viewer2.layers,'region_annotation_id')
             if acronym_mode =='all':
                 target_mask = self.lr_slice_mask 
             else:

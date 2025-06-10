@@ -19,10 +19,23 @@ from confettii.feat_extract import TraverseDataset3d, get_feature_list
 device ='cuda'
 args = load_cfg('config/rm009.yaml')
 "try avg on None, 5, 9"
-args.avg_pool_size = None 
+avg_pool = 8
+args.avg_pool_size = [avg_pool]*3
+print('\n\n\n\n')
+print(f"{args.avg_pool_size= }")
 
+E5 = False 
 cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
-
+cluster_ckpt_pth = '/share/home/shiqiz/data/rm009/ae.pth'
+cnn_ckpt_pth = cluster_ckpt_pth if E5 else cnn_ckpt_pth
+#%%
+log_pth = f'rm009_ae_out/logs/test_rm009/extrac_feats.log'
+import sys
+from contextlib import redirect_stdout
+with open(log_pth, 'w') as f:
+    with redirect_stdout(f):
+        print("This goes to the log file.")
+        # Other code whose output you want to capture
 
 #%%
 encoder_model = build_encoder_model(args, dims=3)
@@ -40,7 +53,6 @@ assert not torch.isclose(torch.tensor(before_mean), torch.tensor(after_mean), at
 from helper.image_reader import Ims_Image
 
 #%%
-E5 = False 
 
 local_img_pth ="/home/confetti/e5_data/rm009/rm009.ims"
 cluster_img_pth ="/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/RM009_all_/009.ims"  
@@ -54,11 +66,11 @@ print(f"raw_volume_size{raw_volume_size}")
 # whole_volume_size = [int(element//2) for element in raw_volume_size]
 # whole_volume_offset = [int(element//4) for element in raw_volume_size]
 whole_volume_size = [4096,6656,6048] 
-whole_volume_size = [64,2048,2048] 
+# whole_volume_size = [64,2048,2048] 
 whole_volume_offset = [8192,2560,1536]
 print(f"whole_volume_size{whole_volume_size}")
 print(f"whole_volume_offset{whole_volume_offset}")
-batch_size = 512
+batch_size = 256 
 #%%
 
 cnn_feature_dim =96
@@ -98,16 +110,16 @@ zarr_shape =[int(n*s) for n,s in zip(zarr_block_num,zarr_chunk_shape)]
 zarr_shape = tuple(int(elem) for elem in zarr_shape)
 zarr_chunk_shape = tuple( int(elem) for elem in zarr_chunk_shape)
 
-save_zarr_file_name = 'half_brain_cnn_feats_s16'
-cluster_zarr_path = f"/share/home/shiqiz/data/rm009/{save_zarr_file_name}_r{level}.zarr"
-local_zarr_path = f"/home/confetti/data/rm009/{save_zarr_file_name}_r{level}.zarr"
-save_zarr_path = cluster_zarr_path if E5 else local_zarr_path 
-
-z_arr = zarr.create_array(store = save_zarr_path, shape=zarr_shape, chunks=zarr_chunk_shape, dtype="float32")
-
 print(f"zarr_blcok_num{zarr_block_num}")
 print(f"zarr_chunk_shape{zarr_chunk_shape}")
 print(f"zarr_shape{zarr_shape}")
+
+save_zarr_file_name = f'half_brain_cnn_feats_avg{avg_pool}'
+cluster_zarr_path = f"/share/home/shiqiz/data/rm009/{save_zarr_file_name}_r{level}.zarr"
+local_zarr_path = f"/home/confetti/data/rm009/{save_zarr_file_name}_r{level}.zarr"
+save_zarr_path =  cluster_zarr_path if E5 else local_zarr_path 
+#%%
+z_arr = zarr.create_array(store = save_zarr_path, shape=zarr_shape, chunks=zarr_chunk_shape, dtype="float32")
 print(z_arr.shape)
 
 #%%
@@ -162,12 +174,11 @@ print(f"all finined!! in extract1 at {save_zarr_path}")
 print(f"total time: {time.time() - current}")
 #%%
 
-
 #%%
 # exam the feature_extration 
 import zarr
-zarr_path = f"/home/confetti/data/rm009/half_brain_cnn_feats_s4_r0.zarr"
-z_arr = zarr.open_array(zarr_path,mode='a')
+zarr_path = "/home/confetti/data/rm009/half_brain_cnn_feats_avg8_r0.zarr"
+z_arr = zarr.open_array(zarr_path,mode='r')
 D,H,W,C = z_arr.shape
 # print(type(z_arr))
 print("ori Shape:", z_arr.shape)
@@ -175,9 +186,62 @@ print("Chunk Shape:", z_arr.chunks)
 print("Data Type:", z_arr.dtype)
 
 #%%
+import numpy as np
 import matplotlib.pyplot as plt
-z_slice = z_arr[0,:,:,:]
+z_slice = z_arr[1,:,:,:]
+from confettii.plot_helper import three_pca_as_rgb_image
+rgb_img = three_pca_as_rgb_image(z_slice.reshape(-1,C),(H,W))
+
 plt.imshow(np.max(z_slice,axis = -1))
+plt.figure(figsize=(12,12))
+plt.imshow(rgb_img)
 
 
 
+
+# %%
+import zarr
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Load Zarr array
+zarr_path = "/home/confetti/data/rm009/half_brain_cnn_feats_avg8_r0.zarr"
+z_arr = zarr.open_array(zarr_path, mode='r')
+D, H, W, C = z_arr.shape
+
+print("ori Shape:", z_arr.shape)
+print("Chunk Shape:", z_arr.chunks)
+print("Data Type:", z_arr.dtype)
+
+# Prepare slice indices
+z_indices = np.linspace(0, D - 1, 6, dtype=int)
+y_indices = np.linspace(0, H - 1, 6, dtype=int)
+x_indices = np.linspace(0, W - 1, 6, dtype=int)
+
+# Create plot
+fig, axes = plt.subplots(3, 6, figsize=(18, 9))
+
+# Z slices (along depth, view as XY)
+for i, idx in enumerate(z_indices):
+    slice_img = z_arr[idx, :, :, :]  # shape: (H, W, C)
+    axes[0, i].imshow(np.max(slice_img, axis=-1), cmap='gray')
+    axes[0, i].set_title(f'Z slice {idx}')
+    axes[0, i].axis('off')
+
+# Y slices (along height, view as XZ)
+for i, idx in enumerate(y_indices):
+    slice_img = z_arr[:, idx, :, :]  # shape: (D, W, C)
+    axes[1, i].imshow(np.max(slice_img, axis=-1), cmap='gray')
+    axes[1, i].set_title(f'Y slice {idx}')
+    axes[1, i].axis('off')
+
+# X slices (along width, view as ZY)
+for i, idx in enumerate(x_indices):
+    slice_img = z_arr[:, :, idx, :]  # shape: (D, H, C)
+    axes[2, i].imshow(np.max(slice_img, axis=-1).T, cmap='gray')  # transpose for proper orientation
+    axes[2, i].set_title(f'X slice {idx}')
+    axes[2, i].axis('off')
+
+plt.tight_layout()
+plt.show()
+# %%

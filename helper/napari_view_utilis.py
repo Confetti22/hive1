@@ -55,7 +55,7 @@ def link_pos_of_plane_layers(layers):
 
 
 
-def save_remove_layer_given_full_name(layers,name):
+def safe_remove_layer_given_full_name(layers,name):
     for layer in layers:
         if layer.name == name:
             layers.remove(name)

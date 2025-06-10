@@ -23,7 +23,7 @@ act_mode: 'elu'
 norm_mode: 'none'
 #_______for mlp_encoder_____
 mlp_filters: [96,48,24,12]
-avg_pool_size: [9,9,9] 
+avg_pool_size: [8,8,8] 
 avg_pool_padding: False
 
 # loss:

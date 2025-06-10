@@ -1,6 +1,4 @@
-
 #%%
-
 from tqdm.auto import tqdm
 import torch
 import torch.optim as optim
@@ -9,20 +7,34 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from contrastive_train_helper import cos_loss,valid,get_vsi_eval_data, MLP,Contrastive_dataset_3d
+from contrastive_train_helper import cos_loss,valid_one_stage,get_t11_eval_data
 from config.load_config import load_cfg
+from lib.arch.ae import build_final_model
+from torchsummary import summary
 import time
 import os
 
 device ='cuda'
-args = load_cfg('config/t11_3d.yaml')
+args = load_cfg('config/t11_3d_one_stage.yaml')
+E5 = args.e5
 
 avg_pool = 8
 args.avg_pool_size = [avg_pool]*3
+
+model = build_final_model(args).to(device)
+#out_shape : B*C*D*H*W ---> need to squeeze
+print(model)
+summary(model,(1,*args.input_size))
+
+build_dataset_fn = getattr(__import__("lib.datasets.{}".format(args.dataset_name), fromlist=["get_dataset"]), "get_dataset")
+train_dataset = build_dataset_fn(args)
+
+#%%
+
 num_epochs = 1000 
 num_pairs = 2**20
 start_epoch = 0 
-batch_size = 4096 
+batch_size = 128 
 # shuffle_very_epoch =50 
 valid_very_epoch = 50 
 n_views = 2
@@ -31,7 +43,7 @@ pos_weight_ratio = 2
 d_near = 64 
 
 exp_save_dir = 'contrastive_run_t11'
-exp_name =f'avg_{avg_pool}_batch{batch_size}_nview{n_views}_pos_weight_{pos_weight_ratio}_mlp{args.mlp_filters}_d_near{d_near}'
+exp_name =f'onestage_avg_{avg_pool}_batch{batch_size}_nview{n_views}_pos_weight_{pos_weight_ratio}_mlp{args.mlp_filters}_d_near{d_near}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 
@@ -41,30 +53,14 @@ script_path = os.path.abspath(__file__)
 shutil.copy2(script_path,f"{exp_save_dir}/{exp_name}/script.py")
 print(f"config has been saved")
 
-#test whether pin zarr in memory will be faster
-device = 'cuda'
-model = MLP(args.mlp_filters).to(device)
-
-E5 = True 
-feats_name ='half_brain_cnn_feats_avg8_r0.zarr'
-if E5:
-    zarr_path=f"/share/home/shiqiz/data/rm009/{feats_name}"
-else:
-    zarr_path =f"/home/confetti/data/rm009/{feats_name}"
 
 #%%
-import zarr
-z_arr = zarr.open_array(zarr_path,mode='a')
 
 #load entire array into memory to accelate indexing feats
 current = time.time()
 # image only extend to 300 at y axis, and only take the half brain at right
-feats_map = z_arr
-D,H,W,C = feats_map.shape
-print(f"read feats_map of shape{feats_map.shape} from zarr consume {time.time() -current}")
 
-dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
-dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle= True,drop_last=False)
+dataloader = DataLoader(dataset=train_dataset,batch_size=batch_size,shuffle= True,drop_last=False)
 
 
 device= 'cuda'
@@ -82,7 +78,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0005)
 # print("model dict loaded")
 # start_epoch = 1200 
 #%%
-eval_data = get_vsi_eval_data()
+eval_data = get_t11_eval_data(E5) 
 for epoch in range(start_epoch,num_epochs): 
     for it, batch in enumerate(dataloader):
         it = epoch * len(dataloader) +it
@@ -106,15 +102,10 @@ for epoch in range(start_epoch,num_epochs):
 
     print(f"epoch:  {epoch}, loss: {loss:.4f}, pos_cos:{pos_cos:.4f}, neg_cos:{neg_cos:.4f}, lr:{optimizer.param_groups[0]["lr"]:.7f}")
 
-    # if (epoch) % valid_very_epoch ==0: 
-    #     model.eval()
-    #     valid(model,epoch,eval_data,writer)
-    #     model.train()
-
-    if (epoch+1) % shuffle_very_epoch ==0:
-        dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
-        dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle=True,drop_last=False)
-            # Save the model every 1000 epochs
+    if (epoch) % valid_very_epoch ==0: 
+        model.eval()
+        valid_one_stage(model,epoch,eval_data,writer)
+        model.train()
 
     if (epoch+1) % valid_very_epoch*4 == 0:
         save_dir = f'{exp_save_dir}/{exp_name}'
@@ -129,7 +120,6 @@ print(f"Final model saved to {final_model_path}")
 
 writer.close()
                         
-    
 
 
 
@@ -140,8 +130,3 @@ writer.close()
 
 
 
-
-
-
-
-# %%

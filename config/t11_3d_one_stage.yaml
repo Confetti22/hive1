@@ -21,11 +21,11 @@ avg_pool_padding: False
 
 
 # dataset:
-e5: False 
+e5: True 
 dataset_name: 'knn_dataset'
-batch_per_gpu: 256 
+batch_per_gpu: 512 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/data/t1779/knn"
+data_path_dir: "/home/confetti/e5_data/t1779/knn"
 
 e5_data_path_dir: "/share/home/shiqiz/data/t1779/knn"

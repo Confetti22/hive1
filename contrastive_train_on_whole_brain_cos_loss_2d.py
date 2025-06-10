@@ -6,7 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from contrastive_train_helper import cos_loss,valid,get_eval_data, MLP, Contrastive_dataset_2d 
+from contrastive_train_helper import cos_loss,valid,get_vsi_eval_data, MLP, Contrastive_dataset_2d 
 import os
 #test whether pin zarr in memory will be faster
 
@@ -52,7 +52,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 
 #%%
-eval_data = get_eval_data()
+eval_data = get_vsi_eval_data()
 for epoch in range(start_epoch,num_epochs): 
     for it, batch in enumerate(dataloader):
         it = epoch * len(dataloader) +it

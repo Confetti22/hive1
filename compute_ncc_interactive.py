@@ -59,7 +59,7 @@ def on_double_click(viewer, event):
     coords = np.concatenate((start_clipped,final_size))
     # Extract the clipped ROI from image data
     roi = ims_vol.from_roi(coords=coords,level=0)
-    # res = shannon_entropy(roi)
-    res = filter(roi)
+    res = shannon_entropy(roi)
+    # res = filter(roi)
     print(f"entrop is:{res} at pos:{coords}")
 napari.run()

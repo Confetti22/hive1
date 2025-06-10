@@ -13,6 +13,128 @@ import pickle
 import random
 import numpy as np
 import tifffile as tif
+from helper.image_reader import Ims_Image
+from confettii.plot_helper import three_pca_as_rgb_image
+
+
+class Contrastive_dataset_3d_one_stage(Dataset):
+    """
+    sample roi in ims file; return positive roi pairs and negative roi pairs for contrastive_learning
+    """
+    def __init__ (self,ims_path,d_near,num_pairs,n_view = 2,verbose = False):
+
+        self.ims_vol =Ims_Image(ims_path,channel=0) 
+        level = 0
+        D,H,W= self.ims_vol.rois[level][3:]
+        d_near = int(d_near) 
+
+        margin = 10 
+        # Generate random (x, y, z) locations within the given range
+        lz, hz = d_near + margin +int(D//4),  int(D*3/4) - d_near - margin
+        ly, hy = d_near + margin +int(H//4),  int(H*3/4) - d_near - margin
+        lx, hx = d_near + margin +int(W//4),  int(W//2) - d_near - margin
+
+        self.loc_lst = np.stack([
+            np.random.randint(lz, hz, size=num_pairs),
+            np.random.randint(ly, hy, size=num_pairs),
+            np.random.randint(lx, hx, size=num_pairs)
+        ], axis=1)
+
+        self.sample_num = num_pairs
+        self.all_near_shifts = generate_sphereshell__shifts(R= d_near,r= 24 ,dims=3)
+        self.n_view =n_view
+
+
+    def __len__(self):
+        return self.sample_num
+    
+    def __getitem__(self,idx):
+
+        z, y, x = self.loc_lst[idx].T    # Unpack coordinates
+        roi = self.ims_vol.from_roi(coords=(z,y,x,64,64,64))
+        roi = roi.astype(np.float32)
+        roi=torch.from_numpy(roi)
+        roi=torch.unsqueeze(roi,0)
+        # for each call, the positive pair is resampled within the near_shifts range, 
+        # maybe fix the positive pair will be better for stable training
+        pair_locs = [self.positve_pair_loc_generate([z,y,x]) for _ in range(self.n_view -1)]
+        pair_roi = [self.get_roi_given_loc(pair_loc) for pair_loc in pair_locs]
+        res = [roi]
+        for pair in pair_roi:
+            res.append(pair)
+
+        #res: x1,neigb1(x1),neigb2(x1),..,neigbN(x1)
+        return res
+
+    def get_roi_given_loc(self,loc):
+        z, y, x = loc   # Unpack coordinates
+        roi = self.ims_vol.from_roi(coords=(z,y,x,64,64,64))
+        roi = roi.astype(np.float32)
+        roi=torch.from_numpy(roi)
+        roi=torch.unsqueeze(roi,0)
+        return roi 
+
+    def positve_pair_loc_generate(self,loc):
+        shift = random.choice(self.all_near_shifts)
+        return loc+shift
+
+
+class Contrastive_dataset_3d_fix_paris(Dataset):
+    """
+    fix the positive pair at the init
+
+    """
+    def __init__(self, feats_map, d_near, num_pairs, n_view=2, verbose=False):
+        D, H, W, C = feats_map.shape
+        self.feats_map = feats_map
+        d_near = int(d_near)
+        margin = 10
+
+        # Generate random (z, y, x) locations within the safe volume
+        lz, hz = d_near + margin, D - d_near - margin
+        ly, hy = d_near + margin, H - d_near - margin
+        lx, hx = d_near + margin, W - d_near - margin
+
+        self.loc_lst = np.stack([
+            np.random.randint(lz, hz, size=num_pairs),
+            np.random.randint(ly, hy, size=num_pairs),
+            np.random.randint(lx, hx, size=num_pairs)
+        ], axis=1)
+
+        self.sample_num = num_pairs
+        self.n_view = n_view
+        self.all_near_shifts = generate_sphereshell__shifts(R=d_near, r=0, dims=3)
+
+        # Fix positive pairs at initialization
+        self.fixed_positive_pairs = [
+            [self.positve_pair_loc_generate(self.loc_lst[i]) for _ in range(n_view - 1)]
+            for i in range(self.sample_num)
+        ]
+
+    def __len__(self):
+        return self.sample_num
+
+    def __getitem__(self, idx):
+        z, y, x = self.loc_lst[idx]
+        feat = self.feats_map[z, y, x, :]  # Shape: (C)
+        feat = torch.from_numpy(feat)
+
+        # Use fixed positive pairs
+        pair_locs = self.fixed_positive_pairs[idx]
+        pair_feats = [torch.from_numpy(self.get_feats_given_loc(loc, self.feats_map)) for loc in pair_locs]
+
+        # res: x1, neigb1(x1), neigb2(x1), ..., neigbN(x1)
+        return [feat] + pair_feats
+
+    def get_feats_given_loc(self, loc, feat_map):
+        z, y, x = loc
+        return feat_map[z, y, x, :]
+
+    def positve_pair_loc_generate(self, loc):
+        shift = random.choice(self.all_near_shifts)
+        loc = np.array(loc)
+        new_loc = loc + shift
+        return np.clip(new_loc, [0, 0, 0], np.array(self.feats_map.shape[:3]) - 1)  # Ensure valid bounds
 
 class Contrastive_dataset_3d(Dataset):
     """
@@ -24,7 +146,7 @@ class Contrastive_dataset_3d(Dataset):
 
         D,H,W,C= feats_map.shape
         self.feats_map = feats_map
-        d_near = int(d_near//(2**3*0.5))
+        d_near = int(d_near) 
 
         margin =10
 
@@ -223,6 +345,24 @@ def plot_ncc_maps(img_lst,loc_idx_lst,locations,writer, tag="ncc_plot", step=0,n
     writer.add_figure(tag, fig, global_step=step)
     plt.close(fig)
 
+def plot_pca_maps(img_lst,writer, tag="pca_plot", step=0,ncols=4,fig_size=4):
+    num_plots = len(img_lst)
+    ncols = ncols
+    nrows = int(np.ceil(num_plots/ ncols))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_size*ncols,  fig_size*nrows))
+
+    for i, ax in enumerate(axes.flat):
+        if i < num_plots:
+            ax.imshow(img_lst[i])
+        ax.axis('off')
+    plt.tight_layout()
+    # Save plot to TensorBoard
+
+    writer.add_figure(tag, fig, global_step=step)
+    plt.close(fig)
+
+
 
 
 def tsne_plot(encoded, labels, ax, title='tsne'):
@@ -252,7 +392,7 @@ def tsne_grid_plot(encoded_list, labels_list, writer, tag='tsne_grid', step=0):
     writer.add_figure(tag, fig, global_step=step)
     plt.close(fig)
 
-def get_eval_data(img_no_list =[1,3,4,5]):
+def get_vsi_eval_data(img_no_list =[1,3,4,5]):
     eval_feats_path = '/home/confetti/data/wide_filed/test_hp_raw_feats.pkl'
     eval_label_path = '/home/confetti/data/wide_filed/test_hp_label.tif'
     eval_img = tif.imread("/home/confetti/data/wide_filed/test_hp_img.tif")
@@ -280,6 +420,81 @@ def get_eval_data(img_no_list =[1,3,4,5]):
 
     return eval_datas 
 
+def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = True):
+    eval_datas = []
+    # === eval feats and ncc_points and labels ===#
+    # Set the path prefix based on E5 flag
+    if E5:
+        prefix = "/share/home/shiqiz/data"
+    else:
+        prefix = "/home/confetti/data"
+
+    # === eval feats and ncc_points and labels ===#
+    for img_no in img_no_list:
+        eval_feats_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_feats.pkl"
+        eval_loactions_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_indexes.pkl"
+        eval_label_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_labels.pkl"
+        vol = tif.imread(f"{prefix}/t1779/test_data_part_brain/{img_no:04d}.tif")
+        z_slice = vol[int(vol.shape[0]//2),:,:]
+
+        with open(eval_feats_path,'rb') as f:
+            eval_feats = pickle.load(f)
+        with open(eval_loactions_path,'rb') as f:
+            eval_locations= pickle.load(f)
+        with open(eval_label_path,'rb') as f:
+            eval_labels= pickle.load(f)
+        eval_dic = {}
+        eval_dic['img'] = vol
+        eval_dic['feats']=eval_feats
+        eval_dic['locations']=eval_locations
+        eval_dic['labels']=eval_labels
+        eval_dic['z_slice'] = z_slice
+        eval_datas.append(eval_dic)
+
+    # sample point idx for ncc plot
+    if ncc_seed_point:
+        eval_datas[0]['loc_idx']=[940,2162,978,4024,3607]
+        eval_datas[1]['loc_idx']=[1015,1883,968,3459,4152]
+        # eval_datas[2]['loc_idx']=[6907, 1982, 2367, 2193,2296]
+        eval_datas[2]['loc_idx']=[6907, 1982, 376, 4692, 2459]
+        eval_datas[3]['loc_idx']=[1779, 3453, 3653, 3223,978]
+    return eval_datas
+
+def valid_one_stage(model,it,eval_data,writer):
+    model.eval()
+
+    ncc_valid_imgs=[]
+    pca_img_lst=[]
+    ncc_seedpoints_idx_lsts =[]
+    tsne_encoded_feats_lst4tsne=[]
+    tsne_label_lst4tsne=[]
+    for idx,data_dic in enumerate(eval_data):
+        roi = data_dic['img']
+        locations =data_dic['locs'] 
+        labels= data_dic['label']
+        idxes = data_dic['loc_idx']
+
+        input = torch.from_numpy(roi).unsqueeze(0).unsqueeze(0).float().to('cuda')
+        outs = model(input).cpu().detach().squeeze().numpy() #C*H*W    D will equals to 1 and is ignored
+        feats_map = np.moveaxis(outs,0,-1) #H*W*C
+        H,W,C = feats_map.shape
+        feats_list = feats_map.reshape(-1, C)
+        rgb_img = three_pca_as_rgb_image(feats_list,(H,W))
+        pca_img_lst.append(rgb_img)
+ 
+        ncc_lst = compute_ncc_map(idxes,feats_list,locations)
+        ncc_valid_imgs.extend(ncc_lst)
+        ncc_seedpoints_idx_lsts.extend(idxes)
+        tsne_encoded_feats_lst4tsne.append(feats_list)
+        tsne_label_lst4tsne.append(labels)
+
+    tsne_grid_plot(tsne_encoded_feats_lst4tsne,tsne_label_lst4tsne,writer,tag=f'tsne',step =it)
+    plot_ncc_maps(ncc_valid_imgs, ncc_seedpoints_idx_lsts,locations,writer=writer, tag=f"ncc",step=it,ncols=len(idxes))
+    plot_pca_maps(pca_img_lst, writer=writer, tag=f"pca",step=it,ncols=len(idxes))
+
+
+
+
 def valid(model,it,eval_data,writer):
     model.eval()
 
@@ -302,8 +517,9 @@ def valid(model,it,eval_data,writer):
         tsne_encoded_feats_lst4tsne.append(encoded)
         tsne_label_lst4tsne.append(labels)
 
-
     tsne_grid_plot(tsne_encoded_feats_lst4tsne,tsne_label_lst4tsne,writer,tag=f'tsne',step =it)
     plot_ncc_maps(ncc_valid_imgs, ncc_seedpoints_idx_lsts,locations,writer=writer, tag=f"ncc",step=it,ncols=len(idxes))
+
+
 
 

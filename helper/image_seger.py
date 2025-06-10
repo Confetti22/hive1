@@ -217,17 +217,20 @@ def seg_by_computing_sim(roi_offset,roi_size,label:np.ndarray,lb,stride = 16):
     mapped_label = mapped_label[:-1,:-1,:-1]
     target_feats_map = get_target_feats_map(mapped_label.shape,roi_offset=roi_offset,lb=lb,stride=stride)
 
-    current = time.time()
-    loc_lst = list(np.ndindex(target_feats_map.shape[:-1]))
-    d_sigma = 16
-    dist = pdist(loc_lst, metric='euclidean')
-    dist_matrix = squareform(dist)
-    print(f"distacne_matrix: {dist_matrix.shape}")
-    dist_matrix = np.exp(- dist_matrix**2/(2*d_sigma**2))
-    print(f"compute_dis_matrix: {time.time() - current}")
+
+    #compute dist_matrix
+    # current = time.time()
+    # loc_lst = list(np.ndindex(target_feats_map.shape[:-1]))
+    # d_sigma = 16
+    # dist = pdist(loc_lst, metric='euclidean')
+    # dist_matrix = squareform(dist)
+    # print(f"distacne_matrix: {dist_matrix.shape}")
+    # dist_matrix = np.exp(- dist_matrix**2/(2*d_sigma**2))
+    # print(f"compute_dis_matrix: {time.time() - current}")
+    
     current = time.time()
 
-    mapped_seg_out = _compute_seg(label_mask = mapped_label,feature_map=target_feats_map, dist_matrix= dist_matrix, spatail_decay=True) 
+    mapped_seg_out = _compute_seg(label_mask = mapped_label,feature_map=target_feats_map, dist_matrix= None, spatail_decay=True) 
     print(f"compute seg time :{time.time() - current}")
     seg_out = map2sample_space(mapped_seg_out,roi_size,vol_start_idx,stride)
     return seg_out
@@ -347,103 +350,6 @@ class SimpleSeger2(widgets.Container):
     def read_roi_size_from_simpleviewer(self):
         return self.simple_viewer.get_roi_size
 
-
-
-
-class SimpleSeger1(widgets.Container):
-    def __init__(self, viewer1: napari.Viewer, viewer2: napari.Viewer,simple_viewer):
-        super().__init__()
-
-        self.simple_viewer = simple_viewer
-
-        stride = 16
-        whole_volume_offset =  [3392, 2512, 3504]
-        valid_offset = [ int(x + int((3/2) *stride)) for x in whole_volume_offset]
-        self.lb = valid_offset
-
-        current  = time.time()
-        roi_offset = [7500,5600,4850]
-        roi_size =[64,64,64]
-
-
-        label_data = np.zeros((roi_size),dtype=np.uint8)
-        self.viewer1 = viewer1
-
-        self.label_layer = self.viewer1.add_labels(label_data,name ='Label')
-        self.segout_layer = self.viewer1.add_labels(label_data,name = 'Segout')
-
-        self.last_seg_data = np.zeros((roi_size),dtype=np.uint8) 
-        self.last_label_data = np.zeros((roi_size),dtype=np.uint8)
-        self.current_label_data = np.zeros((roi_size),dtype=np.uint8)
-
-        self.label_layer.brush_size = 30
-        self.label_layer.mode = 'PAINT'
-        self.viewer1.layers.selection = [self.label_layer]  # Keep selected
-        
-        self.regiser_callbacks()
-
-        
-
-
-    def regiser_callbacks(self):
-        # --- Define separate buttons ---
-        self.simple_viewer.roi_layer.events.data.connect(self.prepare_seg)
-        self.seg_button = widgets.PushButton(text="Seg")
-        self.seg_button.clicked.connect(self.run_seg)
-        self.clear_button = widgets.PushButton(text="Clear")
-        self.clear_button.clicked.connect(self.clear_labels)
-        self.undo_button = widgets.PushButton(text="Undo")
-        self.undo_button.clicked.connect(self.undo_labels)
-
-        self.extend([
-            self.seg_button, 
-            self.clear_button,
-            self.undo_button,
-            ])
-
-    # --- Seg button action ---
-    def prepare_seg(self):
-        roi_size = self.read_roi_size_from_simpleviewer()
-        self.label_layer.data = np.zeros(roi_size,dtype=np.uint8)
-        self.segout_layer.data = np.zeros(roi_size,dtype=np.uint8)
-        self.current_label_data = np.zeros((roi_size),dtype=np.uint8)
-
-
-
-    def run_seg(self,):
-        label_data = self.label_layer.data.copy()
-        
-
-        self.last_label_data = self.current_label_data
-        self.current_label_data  = label_data
-        self.last_seg_data = self.segout_layer.data.copy() 
-
-        roi_offset =self.read_offset_from_simpleviewer()
-        roi_size = self.read_roi_size_from_simpleviewer()
-
-        # need current roi_size and a lb related to pre_computed_feats_map
-        seg_out = seg_by_computing_sim(roi_offset,roi_size,label_data,self.lb,stride = 16)
-        self.segout_layer.data = seg_out 
-
-        self.viewer1.layers.selection = [self.label_layer]  # Keep selected
-
-    def clear_labels(self,):
-        label_layer = self.label_layer
-        label_layer.data = np.zeros_like(label_layer.data)
-        self.segout_layer.data = np.zeros_like(label_layer.data)
-        self.viewer1.layers.selection = [label_layer]  # Keep selected
-
-    def undo_labels(self,):
-        label_layer = self.label_layer
-        label_layer.data = self.last_label_data 
-        self.segout_layer.data = self.last_seg_data 
-        self.viewer1.layers.selection = [label_layer]  # Keep selected
-    
-    def read_offset_from_simpleviewer(self):
-        return self.simple_viewer.get_roi_offset
-
-    def read_roi_size_from_simpleviewer(self):
-        return self.simple_viewer.get_roi_size
 
 
 
