@@ -2,9 +2,9 @@
 import torch.nn as nn
 import torch
 
-from extrac_feats_helper import Encoder ,TraverseDataset3d,get_feature_list
+from helper.extract_feats_helper import Encoder ,TraverseDataset3d,get_feature_list
 import torch.nn as nn
-from extrac_feats_helper import load_cfg
+from helper.extract_feats_helper import load_cfg
 from torchsummary import summary
 from sklearn.cluster import KMeans
 

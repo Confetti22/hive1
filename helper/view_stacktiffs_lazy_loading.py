@@ -47,7 +47,8 @@ if __name__ == '__main__':
     for channel, stack in channel_stacks.items():
         viewer.add_image(stack, name=channel, contrast_limits=[0, 4000], multiscale=False)
 
-    cs = list(viewer.dims.current_step)
-    cs[0] = 12000
-    viewer.dims.current_step = tuple(cs)
+    #set current_step of viewer in napari as needed
+    # cs = list(viewer.dims.current_step)
+    # cs[0] = 12000
+    # viewer.dims.current_step = tuple(cs)
     napari.run()

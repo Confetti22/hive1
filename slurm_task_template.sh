@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_PATH="/share/home/shiqiz/workspace/hive/contrastive_train_on_whole_brain_cos_loss_one_stage.py"
+SCRIPT_PATH="/share/home/shiqiz/workspace/hive/contrastive_train_on_whole_brain_cos_loss_3d.py"
 SCRIPT_NAME=$(basename "$SCRIPT_PATH" .py)
 
 sbatch --job-name="$SCRIPT_NAME" <<EOF
@@ -12,7 +12,7 @@ sbatch --job-name="$SCRIPT_NAME" <<EOF
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
 #SBATCH --partition=compute
-#SBATCH --nodelist=c001
+#SBATCH --nodelist=c003
 #SBATCH --gres=gpu:1
 
 # Load environment

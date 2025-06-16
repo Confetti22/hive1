@@ -29,7 +29,7 @@ class KnnDataset(Dataset):
             files = [os.path.join(dir, fname) for fname in os.listdir(dir) if fname.endswith('.tif')]
             # files  = files[:int(use_ratio*len(self.files))]
             self.files.append(files)
-        print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files)}#####")
+        print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files[0])}#####")
 
     def __len__(self):
  

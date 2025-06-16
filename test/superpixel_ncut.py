@@ -6,11 +6,7 @@ project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_dir)
 from lib.arch.ae import build_final_model,load_compose_encoder_dict,build_encoder_model,load_encoder2encoder
 from config.load_config import load_cfg
-from torchsummary import summary
 from helper.ncut_helper import segment_and_plot_from_feats 
-from skimage import data
-from skimage.graph import rag_mean_color
-from skimage.segmentation import slic
 #%%
 device ='cuda'
 print(f'{os.getcwd()}=')

@@ -7,7 +7,6 @@ from helper.napari_view_utilis import MultipleViewerWidget, toggle_layer_visibil
 from helper.one_dim_statis import OneDimStatis_roi
 
 ##### init model dict ###########
-#%%
 import sys
 import os
 # Get the path to the parent directory of 'test', which is 'project'

@@ -7,7 +7,7 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from contrastive_train_helper import cos_loss,valid_one_stage,get_t11_eval_data
+from helper.contrastive_train_helper import cos_loss,valid_from_roi,get_t11_eval_data
 from config.load_config import load_cfg
 from lib.arch.ae import build_final_model
 from torchsummary import summary
@@ -22,28 +22,31 @@ avg_pool = 8
 args.avg_pool_size = [avg_pool]*3
 
 model = build_final_model(args).to(device)
+init_weight_min = model.cnn_encoder.conv_in[0].weight.min().item()
+init_weight_max= model.cnn_encoder.conv_in[0].weight.max().item()
+print(f"init_weight_min:{init_weight_min}, {init_weight_max= }")
 #out_shape : B*C*D*H*W ---> need to squeeze
-print(model)
-summary(model,(1,*args.input_size))
+# print(model)
+# summary(model,(1,*args.input_size))
 
 build_dataset_fn = getattr(__import__("lib.datasets.{}".format(args.dataset_name), fromlist=["get_dataset"]), "get_dataset")
 train_dataset = build_dataset_fn(args)
 
 #%%
 
-num_epochs = 1000 
+num_epochs = 500 
 num_pairs = 2**20
 start_epoch = 0 
-batch_size = 128 
+batch_size = args.batch_per_gpu 
 # shuffle_very_epoch =50 
-valid_very_epoch = 50 
+valid_very_epoch = 1 
 n_views = 2
 pos_weight_ratio = 2
 # raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
 d_near = 64 
 
 exp_save_dir = 'contrastive_run_t11'
-exp_name =f'onestage_avg_{avg_pool}_batch{batch_size}_nview{n_views}_pos_weight_{pos_weight_ratio}_mlp{args.mlp_filters}_d_near{d_near}'
+exp_name =f'_2onestage_avg_{avg_pool}_batch{batch_size}_nview{n_views}_pos_weight_{pos_weight_ratio}_mlp{args.mlp_filters}_d_near{d_near}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 
@@ -59,9 +62,7 @@ print(f"config has been saved")
 #load entire array into memory to accelate indexing feats
 current = time.time()
 # image only extend to 300 at y axis, and only take the half brain at right
-
-dataloader = DataLoader(dataset=train_dataset,batch_size=batch_size,shuffle= True,drop_last=False)
-
+dataloader = DataLoader(dataset=train_dataset,batch_size=batch_size,shuffle= True,drop_last= True)
 
 device= 'cuda'
 
@@ -69,16 +70,22 @@ device= 'cuda'
 optimizer = optim.Adam(model.parameters(), lr=0.0005) 
 
 ##load the ckpt
-# ckpt_pth = '/share/home/shiqiz/workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_1199.pth'
-# local_ckpt_pth = '/home/confetti/e5_workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_1199.pth'
+# ckpt_pth = '/home/confetti/e5_workspace/hive/contrastive_run_t11/onestage_avg_8_batch256_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near64/model_epoch_300.pth'
+# local_ckpt_pth = '/home/confetti/e5_workspace/hive/contrastive_run_t11/onestage_avg_8_batch256_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near64/model_epoch_300.pth'
 # ckpt_pth = ckpt_pth if E5 else local_ckpt_pth
 # ckpt = torch.load(ckpt_pth, map_location='cpu')
 # print(ckpt.keys())
 # model.load_state_dict(ckpt)
 # print("model dict loaded")
-# start_epoch = 1200 
+# start_epoch = 301 
 #%%
 eval_data = get_t11_eval_data(E5) 
+
+
+model.eval()
+valid_from_roi(model,0,eval_data,writer)
+model.train()
+
 for epoch in range(start_epoch,num_epochs): 
     for it, batch in enumerate(dataloader):
         it = epoch * len(dataloader) +it
@@ -88,7 +95,7 @@ for epoch in range(start_epoch,num_epochs):
         optimizer.zero_grad()
         out = model(batch) 
         out = out.squeeze()
-        loss,pos_cos,neg_cos = cos_loss(features=out,batch_size=batch_size,n_views=n_views,pos_weight_ratio=pos_weight_ratio)
+        loss,pos_cos,neg_cos = cos_loss(features=out,n_views=n_views,pos_weight_ratio=pos_weight_ratio)
 
         loss.backward() 
         optimizer.step() 
@@ -100,11 +107,11 @@ for epoch in range(start_epoch,num_epochs):
         writer.add_scalar('pos_cos',pos_cos.item(), it)
         writer.add_scalar('neg_cos',neg_cos.item(), it)
 
-    print(f"epoch:  {epoch}, loss: {loss:.4f}, pos_cos:{pos_cos:.4f}, neg_cos:{neg_cos:.4f}, lr:{optimizer.param_groups[0]["lr"]:.7f}")
+        print(f"epoch:{epoch}|batch{it}, loss: {loss:.4f}, pos_cos:{pos_cos:.4f}, neg_cos:{neg_cos:.4f}, lr:{optimizer.param_groups[0]["lr"]:.7f}")
 
     if (epoch) % valid_very_epoch ==0: 
         model.eval()
-        valid_one_stage(model,epoch,eval_data,writer)
+        valid_from_roi(model,epoch+1,eval_data,writer)
         model.train()
 
     if (epoch+1) % valid_very_epoch*4 == 0:

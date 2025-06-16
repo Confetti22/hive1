@@ -54,3 +54,19 @@ valid_data_path_dir: "/home/confetti/data/rm009/valid_roi"
 
 e5_data_path_dir: "/share/home/shiqiz/data/rm009/roi_whole_brain4"
 e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/valid_roi" 
+
+
+#for mlp contrastive_learning
+num_epochs: 100
+num_pairs: 1048576 
+start_epoch: 0
+batch_size: 4096
+# shuffle_very_epoch: 50
+valid_very_epoch: 1
+n_views: 2
+pos_weight_ratio: 2
+# raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
+d_near: 1
+loss_enhance: True 
+re_use: False
+exp_save_dir: contrastive_run_rm009

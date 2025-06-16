@@ -1,15 +1,15 @@
 import numpy as np
 import napari
-from magicgui import magicgui, widgets
+from magicgui import widgets
 import tifffile as tif
 from helper.image_reader import wrap_image
 from helper.visulized_fibertract import filter_mask_given_acronym_lst, compute_cuboid_roi, compute_annotation
-from helper.napari_view_utilis import safe_remove_layer_given_full_name, toggle_layer_visibility
+from helper.napari_view_utilis import safe_remove_layer_given_full_name
 import time
 from scipy.ndimage import zoom
 
 from pathlib import Path
-from helper.view_monkey_brain_slice import get_available_channels,load_channel_stack
+from helper.view_stacktiffs_lazy_loading import get_available_channels,load_channel_stack
 import dask.array as da
 
 class SimpleViewer2(widgets.Container):
@@ -190,7 +190,7 @@ class SimpleViewer2(widgets.Container):
 
         resolution_levels = self.image.resolution_levels
         channels = self.image.channels
-        channel_idx =1
+        channel_idx =2
         self.channel_dropdown.changed.disconnect(self.on_channel_change)
         self.channel_dropdown.choices = channels
         self.channel_dropdown.value = channels[channel_idx]
@@ -220,16 +220,16 @@ class SimpleViewer2(widgets.Container):
             return
 
         roi_offset = [int(float(self.z.value)) ,int(float(self.y.value)), int(float(self.x.value))]
-        # roi_size = [
-        #             min(int(self.z_size.value), 128),
-        #             min(int(self.y_size.value), 1536),
-        #             min(int(self.x_size.value), 1536)
-        #         ]
         roi_size = [
-                    int(self.z_size.value),
-                    int(self.y_size.value), 
-                    int(self.x_size.value), 
+                    min(int(self.z_size.value), 128),
+                    min(int(self.y_size.value), 1536),
+                    min(int(self.x_size.value), 1536)
                 ]
+        # roi_size = [
+        #             int(self.z_size.value),
+        #             int(self.y_size.value), 
+        #             int(self.x_size.value), 
+        #         ]
         self.add_data_given_offset_size(roi_offset,roi_size)
 
 

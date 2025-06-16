@@ -18,9 +18,11 @@ avg_pool =8
 args.avg_pool_size = [avg_pool]*3
 args.avg_pool_padding =  False
 
+# the old result on rm009 did not load the correct encoder feats
 cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
-cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
+# cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
+cnn_ckpt_pth = '/home/confetti/data/weights/rm009_3d_ae_best.pth'
 mlp_ckpt_pth ='/home/confetti/e5_workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_2049.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
@@ -35,15 +37,15 @@ import torch
 from lib.utils.preprocess_img import pad_to_multiple_of_unit
 import numpy as np
 import matplotlib.pyplot as plt
-vol = tif.imread('/home/confetti/data/rm009/seg_valid/001_cortex.tiff')
+vol = tif.imread('/home/confetti/data/rm009/seg_valid/_0001.tif')
 zoom_factor= 8
 print(f"{vol.shape= }")
 # vol = pad_to_multiple_of_unit(vol,unit=zoom_factor) 
 print(f"after padding: {vol.shape= }")
-mask = tif.imread('/home/confetti/data/rm009/seg_valid/001_cortex_mask.tiff')
+mask = tif.imread('/home/confetti/data/rm009/seg_valid/_0001_human_mask_3d.tif')
 
-# vol = vol[:,432:1100,206:1329]
-# mask = mask[:,432:1100,206:1329]
+vol = vol[:,432:1100,206:1329]
+mask = mask[:,432:1100,206:1329]
 
 mask_slice = mask[32]
 

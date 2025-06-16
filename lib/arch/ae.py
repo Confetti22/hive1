@@ -377,29 +377,78 @@ def modify_key(weight_dict,source,target):
         new_weight_dict[new_key] = value
     return new_weight_dict
 
-def delete_key(weight_dict,pattern_lst):
+
+def delete_key(weight_dict,pattern_lst:tuple):
     new_weight_dict = {k: v for k, v in weight_dict.items() if not k.startswith(pattern_lst)}
     return new_weight_dict 
-
 
 def load_encoder2encoder(model,ckpt_pth):
     ckpt = torch.load(ckpt_pth)
     removed_module_dict = modify_key(ckpt,source='module.',target='')
-    model.load_state_dict(removed_module_dict,strict=False)
+    load_result = model.load_state_dict(removed_module_dict, strict=False)
+
+    missing = load_result.missing_keys
+    unexpected = load_result.unexpected_keys
+
+    if not missing and not unexpected:
+        print("✅ All weights loaded successfully.")
+    else:
+        print("⚠️ Some weights were not loaded exactly:")
+        if missing:
+            print(f"   • Missing keys ({len(missing)}):\n     {missing}")
+        if unexpected:
+            print(f"   • Unexpected keys ({len(unexpected)}):\n     {unexpected}")
+
+    return load_result
 
 def load_ae2encoder(model,ckpt_pth):
     ckpt = torch.load(ckpt_pth)
     removed_module_dict = modify_key(ckpt['model'],source='module.encoder.',target='')
-    model.load_state_dict(removed_module_dict,strict=False)
+    load_result = model.load_state_dict(removed_module_dict, strict=False)
+
+    missing = load_result.missing_keys
+    unexpected = load_result.unexpected_keys
+
+    if not missing and not unexpected:
+        print("✅ All weights loaded successfully.")
+    else:
+        print("⚠️ Some weights were not loaded exactly:")
+        if missing:
+            print(f"   • Missing keys ({len(missing)}):\n     {missing}")
+        if unexpected:
+            print(f"   • Unexpected keys ({len(unexpected)}):\n     {unexpected}")
+
+    return load_result
 
 
 def load_mlpencoder_dict(model,ckpt_pth):
     ckpt = torch.load(ckpt_pth)
     #remove any 'module.' keywords if exist in weights_pth and remove unwanted layers
-    model.load_state_dict(ckpt,strict=False)
+    load_result = model.load_state_dict(ckpt,strict=False)
 
-def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth,dims):
-    mlp_ckpt = torch.load(mlp_ckpt_pth)
+    # 4. Inspect missing / unexpected keys
+    missing = load_result.missing_keys
+    unexpected = load_result.unexpected_keys
+
+    if not missing and not unexpected:
+        print("✅ All weights loaded successfully.")
+    else:
+        print("⚠️ Some weights were not loaded exactly:")
+        if missing:
+            print(f"   • Missing keys ({len(missing)}):\n     {missing}")
+        if unexpected:
+            print(f"   • Unexpected keys ({len(unexpected)}):\n     {unexpected}")
+
+    return load_result
+
+
+def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth=None, mlp_weight_dict=None, dims=2):
+    if mlp_ckpt_pth is not None:
+        mlp_ckpt = torch.load(mlp_ckpt_pth)
+    elif mlp_weight_dict is not None:
+        mlp_ckpt = mlp_weight_dict
+    else:
+        raise ValueError("Either 'mlp_ckpt_pth' or 'mlp_weight_dict' must be provided.")
 
     conv_state_dict = convmlp_model.state_dict()
     new_state_dict = {}
@@ -422,12 +471,12 @@ def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth,dims):
 
     convmlp_model.load_state_dict(new_state_dict)
 
-def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth,dims=2):
+def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth=None,mlp_weight_dict=None,dims=2):
     cnn = cmodel.cnn_encoder
     mlp = cmodel.mlp_encoder
     load_encoder2encoder(cnn,cnn_ckpt_pth)
     # load_mlpencoder_dict(mlp,mlp_ckpt_pth)
-    load_mlp_ckpt_to_convmlp(mlp,mlp_ckpt_pth,dims)
+    load_mlp_ckpt_to_convmlp(mlp,mlp_ckpt_pth,mlp_weight_dict,dims)
     
 
 

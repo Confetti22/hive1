@@ -16,16 +16,15 @@ norm_mode: 'none'
 mlp_filters: [96,48,24,12]
 
 #____for region_feature_extract___, is applied after cnn_encoder
-avg_pool_size: [2,8,8] 
+avg_pool_size: [8,8,8] 
 avg_pool_padding: False
 
 
 # dataset:
 e5: True 
 dataset_name: 'knn_dataset'
-batch_per_gpu: 512 
+batch_per_gpu: 256 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/e5_data/t1779/knn"
-
+data_path_dir: "/home/confetti/data/t1779/knn"
 e5_data_path_dir: "/share/home/shiqiz/data/t1779/knn"

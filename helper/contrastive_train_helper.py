@@ -274,14 +274,13 @@ class MLP(nn.Module):
         x = self.layers[-1](x)  # Last layer, no activation
         return x / x.norm(p=2, dim=-1, keepdim=True)
 
-def cos_loss(features,batch_size,n_views,pos_weight_ratio=5,eps=1e-9,T=0.1):
+def cos_loss(features,n_views,pos_weight_ratio=5,enhanced =False):
 
     #labels for positive pairs
-    labels = torch.cat([torch.arange(batch_size) for i in range(n_views)], dim=0)
+    N = features.shape[0]
+    labels = torch.cat([torch.arange(int(N//n_views)) for i in range(n_views)], dim=0)
     labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
     
-    features = F.normalize(features +eps, dim=1)
-
     cos_similarity_matrix = torch.matmul(features, features.T)
     # discard the main diagonal from both: labels and similarities matrix
     mask = torch.eye(labels.shape[0], dtype=torch.bool)
@@ -294,9 +293,29 @@ def cos_loss(features,batch_size,n_views,pos_weight_ratio=5,eps=1e-9,T=0.1):
     # select and combine multiple positives and the negatives
     pos_coses = cos_similarity_matrix[labels.bool()].view(labels.shape[0], -1)
     neg_coses = cos_similarity_matrix[~labels.bool()].view(cos_similarity_matrix.shape[0], -1)
+
+    if enhanced:
+        mean_pos_cose = pos_coses.abs().mean()
+        mean_neg_cose = neg_coses.abs().mean()
+
+        # Filter pos_coses: keep only those with abs > mean_pos_cose
+        filtered_pos = pos_coses[pos_coses.abs() > mean_pos_cose]
+        if filtered_pos.numel() > 0:
+            pos_loss = ((filtered_pos - 1) ** 2).mean()
+        else:
+            pos_loss = torch.tensor(0.0, device=pos_coses.device)
+
+        # Filter neg_coses: keep only those with abs < mean_neg_cose
+        filtered_neg = neg_coses[neg_coses.abs() < mean_neg_cose]
+        if filtered_neg.numel() > 0:
+            neg_loss = (filtered_neg ** 2).mean()
+        else:
+            neg_loss = torch.tensor(0.0, device=neg_coses.device)
     
-    pos_loss = ((pos_coses -1 )**2).mean()
-    neg_loss = (neg_coses**2).mean()
+    else:
+        pos_loss = ((pos_coses -1 )**2).mean()
+        neg_loss = (neg_coses**2).mean()
+
     pos_weight = (pos_weight_ratio)/(pos_weight_ratio+1)
     neg_weight = (1)/(pos_weight_ratio+1)
 
@@ -306,21 +325,11 @@ def cos_loss(features,batch_size,n_views,pos_weight_ratio=5,eps=1e-9,T=0.1):
     return pos_loss*pos_weight +neg_loss*neg_weight, pos_coses.mean(),neg_coses.mean()
 
 
-
-
-
-
-
-def compute_ncc_map(loc_idx, encoded, locations):
-    img_length = int(np.sqrt(encoded.shape[0]))
+def compute_ncc_map(loc_idx, encoded, shape):
     ncc_list =[]
     for  idx in loc_idx :
         att = encoded @ encoded[idx]
-        img = np.zeros((img_length, img_length))
-        
-        for i in range(len(att)):
-            img[locations[i][0], locations[i][1]] = att[i]
-        ncc_list.append(img)
+        ncc_list.append(att.reshape(shape))
     return ncc_list
 
 
@@ -431,23 +440,13 @@ def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = True):
 
     # === eval feats and ncc_points and labels ===#
     for img_no in img_no_list:
-        eval_feats_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_feats.pkl"
-        eval_loactions_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_indexes.pkl"
-        eval_label_path = f"{prefix}/t1779/test_data_part_brain/{img_no:04d}_labels.pkl"
+        eval_label_path = f"{prefix}/t1779/test_data_part_brain/human_mask_{img_no:04d}.tif"
         vol = tif.imread(f"{prefix}/t1779/test_data_part_brain/{img_no:04d}.tif")
         z_slice = vol[int(vol.shape[0]//2),:,:]
 
-        with open(eval_feats_path,'rb') as f:
-            eval_feats = pickle.load(f)
-        with open(eval_loactions_path,'rb') as f:
-            eval_locations= pickle.load(f)
-        with open(eval_label_path,'rb') as f:
-            eval_labels= pickle.load(f)
         eval_dic = {}
         eval_dic['img'] = vol
-        eval_dic['feats']=eval_feats
-        eval_dic['locations']=eval_locations
-        eval_dic['labels']=eval_labels
+        eval_dic['label'] = tif.imread(eval_label_path)
         eval_dic['z_slice'] = z_slice
         eval_datas.append(eval_dic)
 
@@ -460,9 +459,36 @@ def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = True):
         eval_datas[3]['loc_idx']=[1779, 3453, 3653, 3223,978]
     return eval_datas
 
-def valid_one_stage(model,it,eval_data,writer):
-    model.eval()
 
+def get_rm009_eval_data(E5,):
+    eval_datas = []
+    # === eval feats and ncc_points and labels ===#
+    # Set the path prefix based on E5 flag
+    if E5:
+        prefix = "/share/home/shiqiz/data"
+    else:
+        prefix = "/home/confetti/data"
+
+    # === eval feats and ncc_points and labels ===#
+    for img_no in [1,2]:
+        vol = tif.imread(f"{prefix}/rm009/seg_valid/{img_no:04d}.tif")
+        mask = tif.imread(f"{prefix}/rm009/seg_valid/{img_no:04d}_human_mask.tif")
+        
+        z_slice = vol[int(vol.shape[0]//2),:,:]
+
+        eval_dic = {}
+        eval_dic['img'] = vol
+        eval_dic['label'] = mask 
+        eval_dic['z_slice'] = z_slice
+        eval_datas.append(eval_dic)
+
+
+    return eval_datas
+
+
+def valid_from_roi(model,it,eval_data,writer):
+    "eval from roi"
+    model.eval()
     ncc_valid_imgs=[]
     pca_img_lst=[]
     ncc_seedpoints_idx_lsts =[]
@@ -470,32 +496,46 @@ def valid_one_stage(model,it,eval_data,writer):
     tsne_label_lst4tsne=[]
     for idx,data_dic in enumerate(eval_data):
         roi = data_dic['img']
-        locations =data_dic['locs'] 
-        labels= data_dic['label']
-        idxes = data_dic['loc_idx']
+        label= data_dic['label']
+        idxes = data_dic.get('loc_idx', [])
 
         input = torch.from_numpy(roi).unsqueeze(0).unsqueeze(0).float().to('cuda')
         outs = model(input).cpu().detach().squeeze().numpy() #C*H*W    D will equals to 1 and is ignored
         feats_map = np.moveaxis(outs,0,-1) #H*W*C
         H,W,C = feats_map.shape
         feats_list = feats_map.reshape(-1, C)
+
+        #rgb_plot
         rgb_img = three_pca_as_rgb_image(feats_list,(H,W))
         pca_img_lst.append(rgb_img)
- 
-        ncc_lst = compute_ncc_map(idxes,feats_list,locations)
-        ncc_valid_imgs.extend(ncc_lst)
-        ncc_seedpoints_idx_lsts.extend(idxes)
+
+        #tsne_plot
         tsne_encoded_feats_lst4tsne.append(feats_list)
-        tsne_label_lst4tsne.append(labels)
+
+        #ncc_plot
+        if len(idxes) > 0:
+            ncc_lst = compute_ncc_map(idxes,feats_list, shape = (H,W))
+            ncc_valid_imgs.extend(ncc_lst)
+            ncc_seedpoints_idx_lsts.extend(idxes)
+            rows, cols = np.indices((H, W))
+            locations = np.stack([rows.ravel(), cols.ravel()], axis=1)
+
+        zoom_factor = [ y/x for y,x in zip([H,W],label.shape)]
+        label = zoom(label,zoom_factor,order=0)
+        tsne_label_lst4tsne.append(label.ravel())
+
 
     tsne_grid_plot(tsne_encoded_feats_lst4tsne,tsne_label_lst4tsne,writer,tag=f'tsne',step =it)
-    plot_ncc_maps(ncc_valid_imgs, ncc_seedpoints_idx_lsts,locations,writer=writer, tag=f"ncc",step=it,ncols=len(idxes))
-    plot_pca_maps(pca_img_lst, writer=writer, tag=f"pca",step=it,ncols=len(idxes))
+    plot_pca_maps(pca_img_lst, writer=writer, tag=f"pca",step=it,ncols=idx+1)
+
+    if len(idxes) > 0: 
+        plot_ncc_maps(ncc_valid_imgs, ncc_seedpoints_idx_lsts,locations,writer=writer, tag=f"ncc",step=it,ncols=len(idxes))
 
 
 
 
-def valid(model,it,eval_data,writer):
+def valid_from_feats(model,it,eval_data,writer):
+    "eval from ae_feats, older version"
     model.eval()
 
     ncc_valid_imgs=[]
@@ -511,7 +551,8 @@ def valid(model,it,eval_data,writer):
         feats = torch.from_numpy(feats).float().to('cuda')
         encoded = model(feats)
         encoded = encoded.detach().cpu().numpy()
-        ncc_lst = compute_ncc_map(idxes,encoded,locations)
+        n = int(np.sqrt(len(encoded.shape[0])))
+        ncc_lst = compute_ncc_map(idxes,encoded,(n,n))
         ncc_valid_imgs.extend(ncc_lst)
         ncc_seedpoints_idx_lsts.extend(idxes)
         tsne_encoded_feats_lst4tsne.append(encoded)

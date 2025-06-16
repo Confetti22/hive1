@@ -6,7 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from contrastive_train_helper import cos_loss,valid,get_vsi_eval_data, MLP, Contrastive_dataset_2d 
+from helper.contrastive_train_helper import cos_loss,valid_from_feats,get_vsi_eval_data, MLP, Contrastive_dataset_2d 
 import os
 #test whether pin zarr in memory will be faster
 
@@ -83,7 +83,7 @@ for epoch in range(start_epoch,num_epochs):
 
     if (epoch) % valid_very_epoch ==0: 
         model.eval()
-        valid(model,epoch,eval_data,writer)
+        valid_from_feats(model,epoch,eval_data,writer)
         model.train()
 
     if (epoch+1) % valid_very_epoch*4 == 0:
