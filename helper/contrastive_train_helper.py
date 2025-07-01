@@ -1,16 +1,13 @@
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
-import numpy as np
-import pickle
 import torch
 import torch.nn.functional as F
-from scipy.ndimage import zoom
 import torch.nn as nn
 from torch.utils.data import Dataset
-import numpy as np
-import pickle
+from sklearn.manifold import TSNE
+from scipy.ndimage import zoom
+import matplotlib.pyplot as plt
 
 import random
+import pickle
 import numpy as np
 import tifffile as tif
 from helper.image_reader import Ims_Image
@@ -138,66 +135,63 @@ class Contrastive_dataset_3d_fix_paris(Dataset):
 
 class Contrastive_dataset_3d(Dataset):
     """
-    different from the old version "Constrastive_dataset"
-    old verion feats_map: C,D,H,W
-    new verion feats_map: D,H,W,C
+    Supports both 4D (D, H, W, C) and 3D (H, W, C) feature maps.
     """
-    def __init__ (self,feats_map,d_near,num_pairs,n_view = 2,verbose = False):
-
-        D,H,W,C= feats_map.shape
+    def __init__(self, feats_map, d_near, num_pairs, n_view=2, verbose=False,margin=10):
         self.feats_map = feats_map
-        d_near = int(d_near) 
+        self.dims = feats_map.ndim - 1  # 3D (volumetric) or 2D (single slice)
+        self.verbose = verbose
+        self.n_view = n_view
+        d_near = int(d_near)
+        
 
-        margin =10
-
-        # Generate random (x, y, z) locations within the given range
-        lx, hx = d_near + margin, D - d_near - margin
-        ly, hy = d_near + margin, H - d_near - margin
-        lz, hz = d_near + margin, W - d_near - margin
-
-        self.loc_lst = np.stack([
-            np.random.randint(lx, hx, size=num_pairs),
-            np.random.randint(ly, hy, size=num_pairs),
-            np.random.randint(lz, hz, size=num_pairs)
-        ], axis=1)
+        if self.dims == 3:
+            D, H, W, C = feats_map.shape
+            lx, hx = d_near + margin, D - d_near - margin
+            ly, hy = d_near + margin, H - d_near - margin
+            lz, hz = d_near + margin, W - d_near - margin
+            self.loc_lst = np.stack([
+                np.random.randint(lx, hx, size=num_pairs),
+                np.random.randint(ly, hy, size=num_pairs),
+                np.random.randint(lz, hz, size=num_pairs)
+            ], axis=1)
+        elif self.dims == 2:
+            H, W, C = feats_map.shape
+            ly, hy = d_near + margin, H - d_near - margin
+            lz, hz = d_near + margin, W - d_near - margin
+            self.loc_lst = np.stack([
+                np.random.randint(ly, hy, size=num_pairs),
+                np.random.randint(lz, hz, size=num_pairs)
+            ], axis=1)
+        else:
+            raise ValueError("Feature map must be either 4D (D, H, W, C) or 3D (H, W, C).")
 
         self.sample_num = num_pairs
-        self.all_near_shifts = generate_sphereshell__shifts(R= d_near,r= 0,dims=3)
-        self.n_view =n_view
-
+        self.all_near_shifts = generate_sphereshell__shifts(R=d_near, r=0, dims=self.dims)
 
     def __len__(self):
         return self.sample_num
-    
-    def __getitem__(self,idx):
 
-        z, y, x = self.loc_lst[idx].T    # Unpack coordinates
-        feat = self.feats_map[z, y, x,:]  # Shape: (C)
-        feat = torch.from_numpy(feat)
-        # for each call, the positive pair is resampled within the near_shifts range, 
-        # maybe fix the positive pair will be better for stable training
-        pair_locs = [self.positve_pair_loc_generate([z,y,x]) for _ in range(self.n_view -1)]
-        pair_feats = [self.get_feats_given_loc(pair_loc,self.feats_map) for pair_loc in pair_locs]
-        res = [feat]
-        for pair in pair_feats:
-            res.append(pair)
+    def __getitem__(self, idx):
+        loc = self.loc_lst[idx]
+        feat = torch.from_numpy(self.get_feats_given_loc(loc)).float()
+        pair_locs = [self.positive_pair_loc_generate(loc) for _ in range(self.n_view - 1)]
+        pair_feats = [torch.from_numpy(self.get_feats_given_loc(pl)).float() for pl in pair_locs]
+        return [feat] + pair_feats
 
-        #res: x1,neigb1(x1),neigb2(x1),..,neigbN(x1)
-        return res
+    def get_feats_given_loc(self, loc):
+        if self.dims == 3:
+            z, y, x = loc
+            return self.feats_map[z, y, x, :]
+        elif self.dims == 2:
+            y, x = loc
+            return self.feats_map[y, x, :]
 
-    def get_feats_given_loc(self,loc,feat_map):
-    
-        z, y, x = loc   # Unpack coordinates
-
-        feats = feat_map[z, y, x,:] 
-        return feats 
-
-    def positve_pair_loc_generate(self,loc):
+    def positive_pair_loc_generate(self, loc):
         shift = random.choice(self.all_near_shifts)
-        return loc+shift
+        return loc + shift
 
-
-class Contrastive_dataset_2d(Dataset):
+class Contrastive_dataset_multiple_2d(Dataset):
     def __init__ (self,feats_map,d_near,n_view = 2,verbose = False):
 
         N,C,H,W = feats_map.shape
@@ -323,6 +317,42 @@ def cos_loss(features,n_views,pos_weight_ratio=5,enhanced =False):
     # pos_loss =(torch.exp( torch.abs((pos_coses-1)/T) ) -1 ).mean()
     # neg_loss = (torch.exp( torch.abs((neg_coses)/T) ) -1 ).mean() 
     return pos_loss*pos_weight +neg_loss*neg_weight, pos_coses.mean(),neg_coses.mean()
+
+
+def cos_loss_topk(features,n_views,pos_weight_ratio=5,only_pos=False):
+    #labels for positive pairs
+    N = features.shape[0]
+    labels = torch.cat([torch.arange(int(N//n_views)) for i in range(n_views)], dim=0)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    
+    cos_similarity_matrix = torch.matmul(features, features.T)
+    # discard the main diagonal from both: labels and similarities matrix
+    mask = torch.eye(labels.shape[0], dtype=torch.bool)
+    labels = labels[~mask].view(labels.shape[0], -1)
+
+    cos_similarity_matrix = cos_similarity_matrix[~mask].view(cos_similarity_matrix.shape[0], -1)
+
+    # select and combine multiple positives and the negatives
+    pos_coses = cos_similarity_matrix[labels.bool()].view(labels.shape[0], -1) #shape (N,n_view-1)
+    neg_coses = cos_similarity_matrix[~labels.bool()].view(cos_similarity_matrix.shape[0], -1) # shape (N, N - n_view)
+
+    k_pos = min(int(n_views/4),1)
+    k_neg = int(N/10)
+    filtered_pos, topk_pos_indices = torch.topk(pos_coses.abs(),k_pos,dim=-1) #shape :N,k_pos
+    if only_pos:
+        filtered_neg = neg_coses
+    else:
+        filtered_neg, topk_neg_indices = torch.topk(neg_coses.abs(),k_neg,dim=-1,largest=False) #shape: N,k_neg
+    filtered_pos_loss = ((filtered_pos - 1) ** 2).mean()
+    filtered_neg_loss = (filtered_neg ** 2).mean()
+ 
+    pos_weight = (pos_weight_ratio)/(pos_weight_ratio+1)
+    neg_weight = (1)/(pos_weight_ratio+1)
+    
+    return pos_weight*filtered_pos_loss + neg_weight+filtered_neg_loss, pos_coses.mean(),neg_coses.mean()
+
+
+
 
 
 def compute_ncc_map(loc_idx, encoded, shape):

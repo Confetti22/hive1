@@ -402,8 +402,8 @@ def seg_via_conv_head(roi_offset, roi_size, label: np.ndarray, lb, stride=16):
 
     start_time = time.time()
     mapped_seg = _seg_via_conv_head(
-        user_mask=mapped_label,
-        feature_map=target_feats_map,
+        user_mask = mapped_label,
+        feature_map = target_feats_map,
         num_epochs=2000
     )
     print(f"compute conv seg time: {time.time() - start_time:.2f}s")

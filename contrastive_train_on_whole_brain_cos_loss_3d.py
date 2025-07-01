@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
-from helper.contrastive_train_helper import cos_loss,valid_from_roi,get_rm009_eval_data, MLP,Contrastive_dataset_3d_fix_paris
+from helper.contrastive_train_helper import cos_loss_topk,valid_from_roi,get_rm009_eval_data, MLP,Contrastive_dataset_3d
 from config.load_config import load_cfg
 from lib.arch.ae import build_final_model,load_compose_encoder_dict
 import time
@@ -27,17 +27,18 @@ num_epochs = args.num_epochs
 num_pairs = args.num_pairs
 start_epoch = args.start_epoch
 batch_size = args.batch_size
-# shuffle_very_epoch = args.shuffle_very_epoch
+shuffle_very_epoch = args.shuffle_very_epoch
 valid_very_epoch = args.valid_very_epoch
+save_very_epoch = 100
 n_views = args.n_views
 pos_weight_ratio = args.pos_weight_ratio
 # raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
 d_near = args.d_near
 
 exp_save_dir = args.exp_save_dir
+only_pos = True 
 
-
-exp_name =f'fixed_pro_loss_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_pos_weight_{pos_weight_ratio}_d_near{d_near}'
+exp_name =f'postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 model_save_dir = f'{exp_save_dir}/{exp_name}'
@@ -72,7 +73,7 @@ feats_map = z_arr
 D,H,W,C = feats_map.shape
 print(f"read feats_map of shape{feats_map.shape} from zarr consume {time.time() -current}")
 
-dataset = Contrastive_dataset_3d_fix_paris(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
+dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
 dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle= True,drop_last=False)
 
 
@@ -116,7 +117,7 @@ for epoch in range(start_epoch,num_epochs):
         optimizer.zero_grad()
         out = model(batch) 
         out = out.squeeze()
-        loss,pos_cos,neg_cos = cos_loss(features=out,n_views=n_views,pos_weight_ratio=pos_weight_ratio,enhanced=args.loss_enhance)
+        loss,pos_cos,neg_cos = cos_loss_topk(features=out,n_views=n_views,pos_weight_ratio=pos_weight_ratio,only_pos=only_pos)
 
         loss.backward() 
         optimizer.step() 
@@ -136,12 +137,12 @@ for epoch in range(start_epoch,num_epochs):
         valid_from_roi(cmpsd_model,epoch,eval_data,writer)
         model.train()
 
-    # if (epoch+1) % shuffle_very_epoch ==0:
-    #     dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
-    #     dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle=True,drop_last=False)
-    #         # Save the model every 1000 epochs
+    if (epoch+1) % shuffle_very_epoch ==0:
+        dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
+        dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle=True,drop_last=False)
+    # Save the model every 1000 epochs
 
-    if (epoch+1) % valid_very_epoch*4 == 0:
+    if (epoch+1) % save_very_epoch == 0:
         model_path = os.path.join(model_save_dir, f'model_epoch_{epoch+1}.pth')
         torch.save(model.state_dict(), model_path)
         print(f"Model saved at epoch {epoch} to {model_path}")
