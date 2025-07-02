@@ -1,40 +1,43 @@
 #%%
 from helper.graph_cut_helper import GraphCutFastBFS
 import torch
-import torch.nn.functional as F
 import numpy as np
 import napari
-from magicgui import magicgui,widgets
+from magicgui import widgets
 from magicgui.widgets import Container
-from scipy.spatial.distance import pdist, squareform
 from scipy.ndimage import zoom
 import time
 
 from lib.arch.ae import build_final_model,load_compose_encoder_dict,build_encoder_model,load_encoder2encoder
 from config.load_config import load_cfg
-from helper.image_seger import _compute_seg2, _compute_seg1
+from helper.image_seger import _compute_seg2,_seg_via_conv_head, _seg_via_mlp_head
+import tifffile as tif
+import torch
+from lib.utils.preprocess_img import pad_to_multiple_of_unit
+from helper.image_reader import Ims_Image
+import numpy as np
 
+#define model 
 device ='cuda'
 args = load_cfg('config/t11_3d.yaml')
 args.avg_pool_size = (8,8,8) 
 
 cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
+
+#load trained weights
 cnn_ckpt_pth = '/home/confetti/data/weights/t11_3d_ae_best2.pth'
 mlp_ckpt_pth ='/home/confetti/data/weights/t11_3d_mlp_best_new_format.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
+#optinal encoder model
 encoder_model = build_encoder_model(args,dims=3) 
 encoder_model.eval().to(device)
 load_encoder2encoder(encoder_model,cnn_ckpt_pth)
 
-import tifffile as tif
-import torch
-from lib.utils.preprocess_img import pad_to_multiple_of_unit
-from helper.image_reader import Ims_Image
-import numpy as np
-import matplotlib.pyplot as plt
 
+
+#prepare data
 ims_vol =Ims_Image('/home/confetti/e5_data/t1779/t1779.ims',channel=2)
 roi_offset =[6980,3425,4040]
 roi_size =[64,1536,1536]
@@ -53,7 +56,7 @@ C,H,W = mlp_out.shape
 
 
 feats_map = mlp_out[:,:,:]
-feats_map = np.moveaxis(feats_map,0,-1) # h,w,C
+feats_map = np.moveaxis(feats_map,0,-1) #  feats_map shape h,w,C
 feats_map_shape = feats_map.shape[:2]
 
 from sklearn.decomposition import PCA
@@ -61,62 +64,40 @@ pca = PCA(n_components=3)
 rgb_vis = pca.fit_transform(feats_map.reshape(-1,C)).reshape(H,W, 3)
 
 z_slice = vol[32]
-z_slcie_shape = z_slice.shape
+input_label_shape = z_slice.shape
 
 
 #%%
 
-def simple_seg_func1(label_mask: np.ndarray, feature_map: np.ndarray, dist_matrix=None, spatail_decay=True,) -> np.ndarray:
-    #downsacel label_mask into the sptial_shape of feature_map
-    zoom_factors = [ x/y for x, y in zip(feats_map_shape,z_slcie_shape)]
-    label_mask = zoom(label_mask, zoom= zoom_factors,order=0)
-    print(f"label_mask.shape {label_mask.shape}")
-    
-    
-    feature_map=np.expand_dims(feature_map,axis=0)
-    label_mask = np.expand_dims(label_mask,axis=0)
-    result = _compute_seg1(label_mask,feature_map,dist_matrix,spatail_decay)
-    result = np.squeeze(result)
-
-
-    #upscale the result into the label/roi spatial_shape
-    zoom_factors = [  y/x for x, y in zip(feats_map_shape,z_slcie_shape)]
-    zoomed_seg_label = zoom(result, zoom=zoom_factors,order=0)
-
-    return zoomed_seg_label.astype(np.uint8)
-
-
-
-def simple_seg_func2(label_mask: np.ndarray, feature_map: np.ndarray,  spatial_decay=True) -> np.ndarray:
+def simple_seg_func(label_mask: np.ndarray, feature_map: np.ndarray,  spatial_decay=True) -> np.ndarray:
     "did not use distance matrix"
-    
+    feats_map_shape = feats_map.shape[:-1]  # (D, H, W, C) or (H, W, C)
+    input_label_shape = label_mask.shape        # (D, H, W) or (H, W)
+
     #downscale label_mask into the spatial_shape of feature_map
-    zoom_factors = [ x/y for x, y in zip(feats_map_shape,z_slcie_shape)]
+    zoom_factors = [ x/y for x, y in zip(feats_map_shape,input_label_shape)]
     label_mask = zoom(label_mask, zoom= zoom_factors,order=0)
     print(f"label_mask.shape {label_mask.shape}")
     
-
     feature_map=np.expand_dims(feature_map,axis=0)
     label_mask = np.expand_dims(label_mask,axis=0)
     result = _compute_seg2(label_mask,feature_map,spatial_decay)
     result = np.squeeze(result)
-   
 
     #upscale the result into the label/roi spatial_shape
-    zoom_factors = [  y/x for x, y in zip(feats_map_shape,z_slcie_shape)]
+    zoom_factors = [  y/x for x, y in zip(feats_map_shape,input_label_shape)]
     zoomed_seg_label = zoom(result, zoom=zoom_factors,order=0)
 
     return zoomed_seg_label.astype(np.uint8)
 
-
-
-
 def graph_cutseg_func(label_mask: np.ndarray, feats_map: np.ndarray) -> np.ndarray:
-    zoom_factors = [ x/y for x, y in zip(feats_map_shape,z_slcie_shape)]
+    feats_map_shape = feats_map.shape[:-1]  # (D, H, W, C) or (H, W, C)
+    input_label_shape = label_mask.shape        # (D, H, W) or (H, W)
+
+    zoom_factors = [ x/y for x, y in zip(feats_map_shape,input_label_shape)]
     label_mask = zoom(label_mask, zoom= zoom_factors,order=0)
     print(f"label_mask.shape {label_mask.shape}")
     
-
     unique_labels = np.unique(label_mask)
     unique_labels = unique_labels[unique_labels != 0]  # ignore background (if 0)
 
@@ -129,106 +110,39 @@ def graph_cutseg_func(label_mask: np.ndarray, feats_map: np.ndarray) -> np.ndarr
     graph_cut.start_cut()
     result = graph_cut.TREE  # or graph_cut.output_array()
 
-
-    zoom_factors = [  y/x for x, y in zip(feats_map_shape,z_slcie_shape)]
+    zoom_factors = [  y/x for x, y in zip(feats_map_shape,input_label_shape)]
     zoomed_seg_label = zoom(result, zoom=zoom_factors,order=0)
 
     return zoomed_seg_label.astype(np.uint8)
 
 
-import torch
-import torch.nn as nn
-from tqdm.auto import tqdm
+def seg_head_seg_func(label_mask: np.ndarray, feats_map: np.ndarray,lr=0.001,num_epochs= 2000, return_prob = False,mode='mlp') -> np.ndarray:
+    feats_map_shape = feats_map.shape[:-1]  # (D, H, W, C) or (H, W, C)
+    input_label_shape = label_mask.shape        # (D, H, W) or (H, W)
 
-class SegmentationHead(nn.Module):
-    def __init__(self, in_features, num_classes):
-        super().__init__()
-        self.classifier = nn.Sequential(
-            nn.Linear(in_features, 12),
-            nn.ReLU(),
-            nn.Linear(12, num_classes)  # Multiclass logits
-        )
-
-    def forward(self, x):
-        return self.classifier(x)
-
-
-def seg_head_seg_func(label_mask: np.ndarray, feats_map: np.ndarray,lr=0.001,num_epochs= 2000, return_prob = False) -> np.ndarray:
-    zoom_factors = [ x/y for x, y in zip(feats_map_shape,z_slcie_shape)]
+    zoom_factors = [ x/y for x, y in zip(feats_map_shape,input_label_shape)]
     label_mask = zoom(label_mask, zoom= zoom_factors,order=0)
-    print(f"label_mask.shape {label_mask.shape}")
-    
 
-    unique_labels = np.unique(label_mask)
-    unique_labels = unique_labels[unique_labels != 0]  # ignore background (if 0)
+    if mode == 'mlp':
+        probs_map = _seg_via_mlp_head(label_mask,feats_map,num_epochs=num_epochs,return_prob=True)
+    else:
+        probs_map = _seg_via_conv_head(label_mask,feats_map,num_epochs=num_epochs,return_prob=True)
 
-    if len(unique_labels) < 2:
-        return np.zeros(label_mask.shape, dtype=np.uint8)
-    device = 'cuda'
-    H, W, C = feats_map.shape
-    feats_map = torch.from_numpy(feats_map)
-    label_mask = torch.from_numpy(label_mask)
-    # Get labeled coordinates and labels (ignore 0)
-    coords = torch.nonzero(label_mask > 0, as_tuple=False)  # [N, 2]
-    labels = label_mask[coords[:, 0], coords[:, 1]] - 1  # Convert to 0-based class index
+    zoom_factors = [  y/x for x, y in zip(feats_map_shape,input_label_shape)]
 
-    num_classes = labels.max().item() + 1
-    if num_classes < 2:
-        raise ValueError("Need at least 2 labeled classes in the mask.")
-
-    y, x =  coords[:, 0], coords[:, 1]
-    prompt_features = feats_map[y, x]  # [N, C]
-
-    head = SegmentationHead(C, num_classes).to(device)
-    optimizer = torch.optim.Adam(head.parameters(), lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
-
-    prompt_features =prompt_features.to(device)
-    prompt_labels = labels.to(device)
-
-    for epoch in tqdm(range(num_epochs)):
-        head.train()
-
-        optimizer.zero_grad()
-        logits = head(prompt_features)
-        loss = loss_fn(logits, prompt_labels)
-        loss.backward()
-        optimizer.step()
-        print(f"loss:{loss.item()}")
-
-    # Predict over full volume
-    flat_features = feats_map.reshape(-1, C).to(device)
-    with torch.no_grad():
-        head.eval()
-        logits = head(flat_features)  # [D*H*W, K]
-        probs = F.softmax(logits, dim=1)  # [D*H*W, K]
-
-    zoom_factors = [  y/x for x, y in zip(feats_map_shape,z_slcie_shape)]
-
+    zoomed_seg_prob = zoom(probs_map, zoom=zoom_factors,order=0)
     if return_prob:
-        prob_map = probs.reshape(H, W, num_classes).permute(2, 0, 1)  # [K, D, H, W]
-        prob_map = prob_map.detach().cpu().numpy()
-        zoomed_seg_prob = zoom(prob_map, zoom=zoom_factors,order=0)
         return zoomed_seg_prob
     else:
-        pred_mask = torch.argmax(probs, dim=1).reshape( H, W) + 1  # Convert back to 1-based labels
-        pred_mask = pred_mask.detach().cpu().numpy()
-        zoomed_seg_label = zoom(pred_mask, zoom=zoom_factors,order=0)
-        return zoomed_seg_label.astype(np.uint8)
+        pred_mask = np.argmax(zoomed_seg_prob, dim=0) + 1  # Convert back to 1-based labels
+        return pred_mask.astype(np.uint8)
         
-
-
-
-
-
-
-
 
 viewer = napari.Viewer(ndisplay=2)
 viewer.add_image(z_slice,name ='img')
 
 
-label_data = np.zeros((z_slcie_shape),dtype=np.uint8)
+label_data = np.zeros((input_label_shape),dtype=np.uint8)
 label_data = tif.imread('/home/confetti/data/t1779/test_data_part_brain/0001_user_input.tif')
 label_data = label_data.astype(int)
 label_layer = viewer.add_labels(label_data,name ='Label')
@@ -238,27 +152,23 @@ label_layer.mode = 'PAINT'
 segout_layer = viewer.add_labels(label_data,name = 'Segout')
 viewer.layers.selection = [label_layer]  # Keep selected
 
+
+
 # --- Define separate buttons ---
 seg_button = widgets.PushButton(text="Seg")
-method_button = widgets.ComboBox(value='sim2',choices=['graphcut','seg_head','sim1','sim2'])
+method_button = widgets.ComboBox(value='sim2',choices=['graphcut','mlp_seg','conv_seg','similarity'])
 pcafeats_button = widgets.ComboBox(value='non-pca',choices=['pca','non-pca'])
 cut_sigma_slider =widgets.ComboBox(label='sigma',value=0.01, choices=[ 0.001, 0.005,0.01,0.05])
 cut_lambda_slider =widgets.ComboBox(label='labmda',value=0.01, choices=[ 0.01, 0.1, 0.5,1, 1.5,2,10,]) 
 clear_button = widgets.PushButton(text="Clear")
 undo_button = widgets.PushButton(text="Undo")
 
-last_seg_data = np.zeros((z_slcie_shape),dtype=np.uint8) 
-last_label_data = np.zeros((z_slcie_shape),dtype=np.uint8)
-current_label_data = np.zeros((z_slcie_shape),dtype=np.uint8)
 
-d_sigma = 8 
-current = time.time()
-loc_lst = list(np.ndindex(feats_map_shape))
-dist = pdist(loc_lst, metric='euclidean')
-dist_matrix = squareform(dist)
-print(f"distacne_matrix: {dist_matrix.shape}")
-dist_matrix = np.exp(- dist_matrix**2/(2*d_sigma**2))
-print(f"compute distance_matirx: {time.time()-current:.3f}")
+
+last_seg_data = np.zeros((input_label_shape),dtype=np.uint8) 
+last_label_data = np.zeros((input_label_shape),dtype=np.uint8)
+current_label_data = np.zeros((input_label_shape),dtype=np.uint8)
+
 
 # --- Seg button action ---
 @seg_button.clicked.connect
@@ -280,13 +190,12 @@ def run_seg():
     print(f"begin cutting")
     if mode =="graphcut":
         seg_result = graph_cutseg_func(label_data, feats)
-    elif mode =='seg_head':
-        seg_result = seg_head_seg_func(label_data, feats)
-    
-    elif mode =='sim1':
-        seg_result = simple_seg_func1(label_data, feats,dist_matrix,True)
-    elif mode =='sim2':
-        seg_result = simple_seg_func2(label_data, feats,True)
+    elif mode =='mlp_seg':
+        seg_result = seg_head_seg_func(label_data, feats,mode='mlp')
+    elif mode =='conv_seg':
+        seg_result = seg_head_seg_func(label_data, feats,mode='conv')
+    elif mode =='similariy':
+        seg_result = simple_seg_func(label_data, feats,True)
     else:
         print('wrong seg method mode')
 
@@ -311,29 +220,8 @@ def undo_labels():
 
 
 
-#using magicgui decorator will wrap the function in a FunctionGui object and turn it into a widget 
-@magicgui(call_button='test2',layout='vertical')
-def test_widg(viewer):
-    global last_label_data
-    print("called with viewer",viewer)
-    print(f"in test_func,, last_label_data.shape {last_label_data.shape}")
-
-print(type(test_widg))
-#the parameter of test_widg is now turned into a sub-widget
-test_widg.viewer.value = viewer
-#alternative way
-print(f"the viewer attribute type {type(test_widg['viewer'])}")
-# test_widg['viewer'].value = viewer
-
-
-# --- Combine buttons into a container widget ---
 control_panel = Container(widgets=[method_button,pcafeats_button,cut_lambda_slider,cut_sigma_slider,seg_button, clear_button,undo_button])
 
-# Add widget to napari
 viewer.window.add_dock_widget(control_panel, area='right')
-viewer.window.add_dock_widget(test_widg, area='right')
-
-# viewer_widget = SimpleViewer(viewer=viewer)
-# viewer.window.add_dock_widget(viewer_widget,area='right')
 napari.run()
 
