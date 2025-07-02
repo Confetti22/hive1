@@ -244,6 +244,7 @@ class SegmentationHead(nn.Module):
 class ConvSegHead(nn.Module):
     """
     A small 3D convolutional head for voxel-wise classification.
+    adding padding to insure the output shape is the same as input
     """
     def __init__(self, in_channels, num_classes):
         super().__init__()
@@ -257,84 +258,111 @@ class ConvSegHead(nn.Module):
         # x shape: [B, C, D, H, W]
         return self.net(x)  # logits per class
 
-
-
-def _seg_via_mlp_head(user_mask, feature_map, num_epochs=100, lr=1e-3,return_prob = False):
+def _seg_via_mlp_head(user_mask, feature_map, num_epochs=100, lr=1e-3, return_prob=False):
     """
     Args:
-        user_mask: numpy of shape (D, H, W), where labeled voxels have integer class labels >= 0.
-        feature_map: numpy of shape (D, H, W, C)
+        user_mask: numpy of shape (D, H, W) or (H, W), where labeled voxels have integer class labels >= 0.
+        feature_map: numpy of shape (D, H, W, C) or (H, W, C)
     
     Returns:
-        predicted_mask: numpy of shape (D, H, W), with predicted class labels (int64)
+        predicted_mask: numpy of shape (D, H, W) or (H, W), with predicted class labels (int64)
     """
-    device = 'cuda' 
-    D, H, W, C = feature_map.shape
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     feature_map = torch.from_numpy(feature_map)
     user_mask = torch.from_numpy(user_mask)
-    # Get labeled coordinates and labels (ignore 0)
-    coords = torch.nonzero(user_mask > 0, as_tuple=False)  # [N, 3]
-    labels = user_mask[coords[:, 0], coords[:, 1], coords[:, 2]] - 1  # Convert to 0-based class index
 
+    if feature_map.dim() == 4:
+        D, H, W, C = feature_map.shape
+        coords = torch.nonzero(user_mask > 0, as_tuple=False)  # [N, 3]
+        z, y, x = coords[:, 0], coords[:, 1], coords[:, 2]
+        prompt_features = feature_map[z, y, x]  # [N, C]
+    elif feature_map.dim() == 3:
+        H, W, C = feature_map.shape
+        coords = torch.nonzero(user_mask > 0, as_tuple=False)  # [N, 2]
+        y, x = coords[:, 0], coords[:, 1]
+        prompt_features = feature_map[y, x]  # [N, C]
+    else:
+        raise ValueError("feature_map must be 3D or 4D")
+
+    labels = user_mask[tuple(coords.T)] - 1  # Convert to 0-based index
     num_classes = labels.max().item() + 1
+
     if num_classes < 2:
         raise ValueError("Need at least 2 labeled classes in the mask.")
-
-    z, y, x = coords[:, 0], coords[:, 1], coords[:, 2]
-    prompt_features = feature_map[z, y, x]  # [N, C]
 
     head = SegmentationHead(C, num_classes).to(device)
     optimizer = torch.optim.Adam(head.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
-    prompt_features =prompt_features.to(device)
+    prompt_features = prompt_features.to(device)
     prompt_labels = labels.to(device)
 
     for epoch in tqdm(range(num_epochs)):
         head.train()
-
         optimizer.zero_grad()
         logits = head(prompt_features)
         loss = loss_fn(logits, prompt_labels)
         loss.backward()
         optimizer.step()
-        print(f"loss:{loss.item()}")
+        print(f"loss: {loss.item():.4f}")
 
-    # Predict over full volume
+    # Predict over full volume/image
     flat_features = feature_map.reshape(-1, C).to(device)
     with torch.no_grad():
         head.eval()
-        logits = head(flat_features)  # [D*H*W, K]
-        probs = F.softmax(logits, dim=1)  # [D*H*W, K]
+        logits = head(flat_features)
+        probs = F.softmax(logits, dim=1)
 
     if return_prob:
-        prob_vol = probs.reshape(D, H, W, num_classes).permute(3, 0, 1, 2)  # [K, D, H, W]
+        prob_vol = probs.reshape((-1, num_classes)).reshape(*feature_map.shape[:-1], num_classes)
+        if feature_map.dim() == 4:
+            prob_vol = prob_vol.permute(3, 0, 1, 2)  # [K, D, H, W]
+        else:
+            prob_vol = prob_vol.permute(2, 0, 1)      # [K, H, W]
         return prob_vol.detach().cpu().numpy()
     else:
-        pred_mask = torch.argmax(probs, dim=1).reshape(D, H, W) + 1  # Convert back to 1-based labels
+        pred_mask = torch.argmax(probs, dim=1).reshape(feature_map.shape[:-1]) + 1
         return pred_mask.detach().cpu().numpy()
+
 
 
 def _seg_via_conv_head(user_input_label, feature_map, num_epochs=100, lr=1e-3, return_prob=False):
     """
     Args:
-        user_mask: numpy of shape (D, H, W), labels >=1
-        feature_map: numpy of shape (D, H, W, C)
+        user_input_label: numpy of shape (D, H, W) or (H, W), labels >= 1
+        feature_map: numpy of shape (D, H, W, C) or (H, W, C)
     Returns:
-        predicted_mask or probabilities of shape (D,H,W)
+        predicted_mask or probabilities of shape (D, H, W) or (H, W)
     """
-    device = 'cuda'
-    D, H, W, C = feature_map.shape
-    # prepare tensors
-    # do not unsqueeze the feat and mask
-    feat = torch.from_numpy(feature_map).permute(3, 0, 1, 2).to(device)
-    user_input_label = torch.from_numpy(user_input_label).long().to(device)
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from tqdm import tqdm
 
-    # only supervise labeled voxels
-    labels = user_input_label - 1  # 0-based
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    #downscale the spatial size of labels to match the conv_seg_output
-    mask = (labels >= 0)
+    feature_map = torch.from_numpy(feature_map).float()
+    user_input_label = torch.from_numpy(user_input_label).long()
+
+    is_3d = feature_map.dim() == 3  # (H, W, C)
+    is_4d = feature_map.dim() == 4  # (D, H, W, C)
+
+    if is_4d:
+        D, H, W, C = feature_map.shape
+        feat = feature_map.permute(3, 0, 1, 2).to(device)  # [C, D, H, W]
+        labels = user_input_label.to(device) - 1  # 0-based
+        mask = (labels >= 0)
+        spatial_shape = (D, H, W)
+    elif is_3d:
+        H, W, C = feature_map.shape
+        feat = feature_map.permute(2, 0, 1).unsqueeze(1).to(device)  # [C, 1, H, W]
+        labels = user_input_label.to(device) - 1  # 0-based
+        mask = (labels >= 0)
+        spatial_shape = (H, W)
+    else:
+        raise ValueError("feature_map must be 3D or 4D")
+
     num_classes = labels.max().item() + 1
     if num_classes < 2:
         raise ValueError("Need at least 2 labeled classes in the mask.")
@@ -343,34 +371,35 @@ def _seg_via_conv_head(user_input_label, feature_map, num_epochs=100, lr=1e-3, r
     optimizer = torch.optim.Adam(head.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
-    # training loop
     for epoch in tqdm(range(num_epochs)):
         head.train()
         optimizer.zero_grad()
-        logits = head(feat)  # [K, D, H, W]
+        logits = head(feat)  # [K, D, H, W] or [K, 1, H, W]
 
-        # loss = loss_fn(logits[user_input_label > 0], (labels)[user_input_label > 0])
+        logits = logits if is_4d else logits.squeeze(1)  # remove dummy D=1 for 2D
 
-        # flatten for masked selection
-        logits_flat = logits.permute(1, 2, 3, 0)[mask]  # [N, num_classes]
-        labels_flat = labels[mask]  # [N]
+        # Permute logits to [D, H, W, K] or [H, W, K]
+        logits_flat = logits.permute(*range(1, logits.ndim), 0)[mask]  # [N, K]
+        labels_flat = labels[mask]
+
         loss = loss_fn(logits_flat, labels_flat)
-
         loss.backward()
         optimizer.step()
-        if epoch % 100 == 0:
+
+        if epoch % 50 == 0 or epoch == num_epochs - 1:
             print(f"Conv head epoch {epoch}, loss: {loss.item():.4f}")
 
-    # inference
+    # Inference
     head.eval()
     with torch.no_grad():
         logits = head(feat)
-        probs = F.softmax(logits, dim=0)  # [K, D, H, W]
+        logits = logits if is_4d else logits.squeeze(1)
+        probs = F.softmax(logits, dim=0)  # [K, D, H, W] or [K, H, W]
 
     if return_prob:
         return probs.detach().cpu().numpy()
     else:
-        pred = torch.argmax(probs, dim=0) + 1
+        pred = torch.argmax(probs, dim=0) + 1  # back to 1-based label
         return pred.detach().cpu().numpy()
 
 
