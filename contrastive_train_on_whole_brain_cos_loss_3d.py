@@ -29,7 +29,7 @@ start_epoch = args.start_epoch
 batch_size = args.batch_size
 shuffle_very_epoch = args.shuffle_very_epoch
 valid_very_epoch = args.valid_very_epoch
-save_very_epoch = 100
+save_very_epoch = 10
 n_views = args.n_views
 pos_weight_ratio = args.pos_weight_ratio
 # raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
@@ -38,7 +38,7 @@ d_near = args.d_near
 exp_save_dir = args.exp_save_dir
 only_pos = True 
 
-exp_name =f'postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
+exp_name =f'__postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 model_save_dir = f'{exp_save_dir}/{exp_name}'
@@ -52,10 +52,10 @@ E5 = args.e5
 
 if E5:
     data_prefix = "/share/home/shiqiz/data"
-    workspace_prefix = "/share/home/shiqiz/workspace/hive"
+    workspace_prefix = "/share/home/shiqiz/workspace/hive1"
 else:
     data_prefix = "/home/confetti/data"
-    workspace_prefix = '/home/confetti/e5_workspace/hive'
+    workspace_prefix = '/home/confetti/e5_workspace/hive1'
 
 
 feats_name ='half_brain_cnn_feats_avg8_r0.zarr'
@@ -95,7 +95,8 @@ if args.re_use:
 
     ckpt = torch.load(ckpt_pth, map_location='cpu')
     print(ckpt.keys())
-    model.load_state_dict(ckpt)
+    res = model.load_state_dict(ckpt)
+    print()
 #%%
 eval_data = get_rm009_eval_data(E5=E5)
 

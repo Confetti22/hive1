@@ -62,10 +62,10 @@ E5 = args.e5
 
 if E5:
     data_prefix = "/share/home/shiqiz/data"
-    workspace_prefix = "/share/home/shiqiz/workspace/hive"
+    workspace_prefix = "/share/home/shiqiz/workspace/hive1"
 else:
     data_prefix = "/home/confetti/data"
-    workspace_prefix = '/home/confetti/e5_workspace/hive'
+    workspace_prefix = '/home/confetti/e5_workspace/hive1'
 
 with open(f"{data_prefix}/rm009/small_multiscale_zslice_feats_map.pkl",'rb')as f:
     middle_zslice_feats_map  = pickle.load(f)
@@ -90,14 +90,12 @@ print(f"{features.shape=}")
 dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False,margin=4)
 dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle= True,drop_last=False)
 
-
-
 optimizer = optim.Adam(model.parameters(), lr=0.0005) 
 
 import re
 ##load the ckpt
 if args.re_use:
-    ckpt_pth = f"{workspace_prefix}/contrastive_run_rm009/fixed_pro_loss_mean/model_epoch_5.pth" 
+    ckpt_pth = f"{workspace_prefix}/outs/contrastive_run_rm009/postopk_neview4_level_l2_pool_kernel8_shuffle50_batch4096/model_epoch_1900.pth" 
     # Extract the epoch number from the filename
     match = re.search(r'model_epoch_(\d+)', ckpt_pth)
     if match:
@@ -108,13 +106,9 @@ if args.re_use:
     ckpt = torch.load(ckpt_pth, map_location='cpu')
     print(ckpt.keys())
     model.load_state_dict(ckpt)
+    
 #%%
-eval_data = get_rm009_eval_data(E5=E5)
-
-
 img_logger = HTMLFigureLogger(log_dir=f'{exp_save_dir}/{exp_name}',html_name="pca_plot.html",comment=f'shuffle_every_{shuffle_very_epoch}')
-
-
 
 for epoch in range(start_epoch,num_epochs): 
     for batch_idx, batch in enumerate(dataloader):

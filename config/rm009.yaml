@@ -44,7 +44,7 @@ weight_decay: 0.01
 lr_warmup: 10
 
 # dataset:
-e5: True 
+e5: False 
 dataset_name: 'simple_dataset'
 batch_per_gpu: 256 
 num_workers: 0
@@ -60,13 +60,13 @@ e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/valid_roi"
 num_epochs: 10000
 num_pairs: 16384 
 start_epoch: 0
-batch_size: 2048 
+batch_size: 4096 
 shuffle_very_epoch: 50 
 valid_very_epoch: 10
-n_views: 8 
+n_views: 4 
 pos_weight_ratio: 2
 # raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
 d_near: 4 
 loss_enhance: True 
-re_use: False
-exp_save_dir: contrastive_run_rm009
+re_use: True 
+exp_save_dir: "outs/contrastive_run_rm009"

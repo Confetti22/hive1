@@ -12,7 +12,7 @@ sbatch --job-name="$SCRIPT_NAME" <<EOF
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=24G
 #SBATCH --partition=tao
-#SBATCH --nodelist=t001
+#SBATCH --nodelist=t000
 #SBATCH --gres=gpu:1
 
 # Load environment

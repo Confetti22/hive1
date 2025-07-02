@@ -248,9 +248,9 @@ class ConvSegHead(nn.Module):
     def __init__(self, in_channels, num_classes):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv3d(in_channels, in_channels // 2, kernel_size=5, padding=1),
+            nn.Conv3d(in_channels, in_channels // 2, kernel_size=5, padding=2),
             nn.ReLU(),
-            nn.Conv3d(in_channels // 2, num_classes, kernel_size=1)
+            nn.Conv3d(in_channels // 2, num_classes, kernel_size=1, padding=0)
         )
 
     def forward(self, x):
@@ -315,22 +315,26 @@ def _seg_via_mlp_head(user_mask, feature_map, num_epochs=100, lr=1e-3,return_pro
         return pred_mask.detach().cpu().numpy()
 
 
-def _seg_via_conv_head(user_mask, feature_map, num_epochs=100, lr=1e-3, return_prob=False):
+def _seg_via_conv_head(user_input_label, feature_map, num_epochs=100, lr=1e-3, return_prob=False):
     """
     Args:
         user_mask: numpy of shape (D, H, W), labels >=1
         feature_map: numpy of shape (D, H, W, C)
     Returns:
-        predicted_mask or probabilities
+        predicted_mask or probabilities of shape (D,H,W)
     """
     device = 'cuda'
     D, H, W, C = feature_map.shape
     # prepare tensors
-    feat = torch.from_numpy(feature_map).permute(3, 0, 1, 2).unsqueeze(0).to(device)
-    mask = torch.from_numpy(user_mask).long().unsqueeze(0).unsqueeze(0).to(device)
+    # do not unsqueeze the feat and mask
+    feat = torch.from_numpy(feature_map).permute(3, 0, 1, 2).to(device)
+    user_input_label = torch.from_numpy(user_input_label).long().to(device)
 
     # only supervise labeled voxels
-    labels = mask - 1  # 0-based
+    labels = user_input_label - 1  # 0-based
+
+    #downscale the spatial size of labels to match the conv_seg_output
+    mask = (labels >= 0)
     num_classes = labels.max().item() + 1
     if num_classes < 2:
         raise ValueError("Need at least 2 labeled classes in the mask.")
@@ -343,8 +347,15 @@ def _seg_via_conv_head(user_mask, feature_map, num_epochs=100, lr=1e-3, return_p
     for epoch in tqdm(range(num_epochs)):
         head.train()
         optimizer.zero_grad()
-        logits = head(feat)  # [1, K, D, H, W]
-        loss = loss_fn(logits[mask > 0], (labels)[mask > 0])
+        logits = head(feat)  # [K, D, H, W]
+
+        # loss = loss_fn(logits[user_input_label > 0], (labels)[user_input_label > 0])
+
+        # flatten for masked selection
+        logits_flat = logits.permute(1, 2, 3, 0)[mask]  # [N, num_classes]
+        labels_flat = labels[mask]  # [N]
+        loss = loss_fn(logits_flat, labels_flat)
+
         loss.backward()
         optimizer.step()
         if epoch % 100 == 0:
@@ -354,7 +365,7 @@ def _seg_via_conv_head(user_mask, feature_map, num_epochs=100, lr=1e-3, return_p
     head.eval()
     with torch.no_grad():
         logits = head(feat)
-        probs = F.softmax(logits, dim=1)[0]  # [K, D, H, W]
+        probs = F.softmax(logits, dim=0)  # [K, D, H, W]
 
     if return_prob:
         return probs.detach().cpu().numpy()
@@ -402,7 +413,7 @@ def seg_via_conv_head(roi_offset, roi_size, label: np.ndarray, lb, stride=16):
 
     start_time = time.time()
     mapped_seg = _seg_via_conv_head(
-        user_mask = mapped_label,
+        user_input_label = mapped_label,
         feature_map = target_feats_map,
         num_epochs=2000
     )
@@ -470,7 +481,7 @@ class SimpleSeger2(widgets.Container):
 
     def _setup_buttons(self):
         self.method_selector = widgets.ComboBox(
-                choices=["computing_sim", "mlp_head"],
+                choices=["computing_sim", "mlp_head","conv_head"],
                 value="computing_sim",
                 label="Segmentation Method"
             )

@@ -134,6 +134,8 @@ def graph_cutseg_func(label_mask: np.ndarray, feats_map: np.ndarray) -> np.ndarr
     zoomed_seg_label = zoom(result, zoom=zoom_factors,order=0)
 
     return zoomed_seg_label.astype(np.uint8)
+
+
 import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
