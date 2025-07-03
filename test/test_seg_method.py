@@ -1,4 +1,10 @@
 #%%
+import sys
+import os
+# Get the path to the parent directory of 'test', which is 'project'
+project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_dir)
+
 from helper.graph_cut_helper import GraphCutFastBFS
 import torch
 import numpy as np
@@ -130,11 +136,11 @@ def seg_head_seg_func(label_mask: np.ndarray, feats_map: np.ndarray,lr=0.001,num
 
     zoom_factors = [  y/x for x, y in zip(feats_map_shape,input_label_shape)]
 
-    zoomed_seg_prob = zoom(probs_map, zoom=zoom_factors,order=0)
+    zoomed_seg_prob = zoom(probs_map, zoom=(1,*zoom_factors),order=0)
     if return_prob:
         return zoomed_seg_prob
     else:
-        pred_mask = np.argmax(zoomed_seg_prob, dim=0) + 1  # Convert back to 1-based labels
+        pred_mask = np.argmax(zoomed_seg_prob, axis=0) + 1  # Convert back to 1-based labels
         return pred_mask.astype(np.uint8)
         
 
@@ -156,8 +162,9 @@ viewer.layers.selection = [label_layer]  # Keep selected
 
 # --- Define separate buttons ---
 seg_button = widgets.PushButton(text="Seg")
-method_button = widgets.ComboBox(value='sim2',choices=['graphcut','mlp_seg','conv_seg','similarity'])
+method_button = widgets.ComboBox(value='conv_seg',choices=['graphcut','mlp_seg','conv_seg','similarity'])
 pcafeats_button = widgets.ComboBox(value='non-pca',choices=['pca','non-pca'])
+epoch_choice = widgets.ComboBox(label='epoch',value= 2000, choices=[100,1000,2000,5000,10000])
 cut_sigma_slider =widgets.ComboBox(label='sigma',value=0.01, choices=[ 0.001, 0.005,0.01,0.05])
 cut_lambda_slider =widgets.ComboBox(label='labmda',value=0.01, choices=[ 0.01, 0.1, 0.5,1, 1.5,2,10,]) 
 clear_button = widgets.PushButton(text="Clear")
@@ -180,8 +187,11 @@ def run_seg():
     last_label_data = current_label_data
     current_label_data  = label_data
     last_seg_data = segout_layer.data.copy() 
+
     mode = method_button.value
     feats_map_mode = pcafeats_button.value
+    num_epoch = epoch_choice.value
+
     if feats_map_mode =='pca':
         feats = rgb_vis
     else:
@@ -191,11 +201,11 @@ def run_seg():
     if mode =="graphcut":
         seg_result = graph_cutseg_func(label_data, feats)
     elif mode =='mlp_seg':
-        seg_result = seg_head_seg_func(label_data, feats,mode='mlp')
+        seg_result = seg_head_seg_func(label_data, feats, num_epochs=num_epoch, mode='mlp')
     elif mode =='conv_seg':
-        seg_result = seg_head_seg_func(label_data, feats,mode='conv')
-    elif mode =='similariy':
-        seg_result = simple_seg_func(label_data, feats,True)
+        seg_result = seg_head_seg_func(label_data, feats, num_epochs=num_epoch, mode='conv')
+    elif mode =='similarity':
+        seg_result = simple_seg_func(label_data, feats, spatial_decay=True)
     else:
         print('wrong seg method mode')
 
@@ -220,7 +230,7 @@ def undo_labels():
 
 
 
-control_panel = Container(widgets=[method_button,pcafeats_button,cut_lambda_slider,cut_sigma_slider,seg_button, clear_button,undo_button])
+control_panel = Container(widgets=[method_button,pcafeats_button,epoch_choice,cut_lambda_slider,cut_sigma_slider,seg_button, clear_button,undo_button])
 
 viewer.window.add_dock_widget(control_panel, area='right')
 napari.run()
