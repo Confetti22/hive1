@@ -4,19 +4,17 @@ import os
 # Get the path to the parent directory of 'test', which is 'project'
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_dir)
-#%%
 from lib.arch.ae import build_encoder_model,load_encoder2encoder
 from config.load_config import load_cfg
 from torchsummary import summary
 
 device ='cuda'
-print(f'{os.getcwd()}=')
 args = load_cfg('config/rm009.yaml')
 
 avg_pool = None 
 args.avg_pool_size = [avg_pool]*3
 args.avg_pool_padding =  False
-E5 = True 
+E5 = False 
 
 if E5:
     data_prefix = "/share/home/shiqiz/data"
@@ -48,8 +46,9 @@ print(f"{vol.shape= },{mask.shape= }")
 print(f"after padding: {vol.shape= }")
 
 #crop the cortex roi 
-vol = vol[:,432:1100,206:1329]
-mask = mask[:,432:1100,206:1329]
+# vol = vol[:,:77,:]
+vol  = np.random.randint(0,100,(76,1024,1024))
+# mask = mask[:,432:1100,206:1329]
 # mask_slice = mask[32]
 
 #%% get different_resolution feature_map
@@ -76,6 +75,7 @@ hook2.remove()
 feat_map=[]
 for k in (2,4,8):
     feats_dic={}
+    # pool = nn.AvgPool3d(kernel_size=[k]*3, stride=1,padding=int((k-1)//2))
     pool = nn.AvgPool3d(kernel_size=[k]*3, stride=1,padding=0)
     l1_feats_avg  = pool(l1_feats)
     l2_feats_avg  = pool(l2_feats)
@@ -92,6 +92,12 @@ feats_dic['l1']=l1_feats.cpu().detach().numpy()
 feats_dic['l2']=l2_feats.cpu().detach().numpy()
 feats_dic['l3']=l3_feats.cpu().detach().numpy()
 feat_map.insert(0,feats_dic)
+
+for k_dict in feat_map:
+    print(k_dict['l1'].shape)
+    print(k_dict['l2'].shape)
+    print(k_dict['l3'].shape, "\n")
+#%%
 
 # extract the z_slice feat_map from each 4Dfeature_map
 one_third_zslice_feats_map = {} 
@@ -111,6 +117,7 @@ for idx,k_dict in enumerate(feat_map):
 
 
 del feats_dic
+
 for key,k_dict in one_third_zslice_feats_map.items():
     print(k_dict['l1'].shape)
     print(k_dict['l2'].shape)

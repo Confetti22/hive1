@@ -3,7 +3,6 @@ import zarr
 import numpy as np
 import napari
 from magicgui import widgets
-from scipy.spatial.distance import pdist, squareform
 from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
@@ -335,10 +334,6 @@ def _seg_via_conv_head(user_input_label, feature_map, num_epochs=100, lr=1e-3, r
     Returns:
         predicted_mask or probabilities of shape (D, H, W) or (H, W)
     """
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    from tqdm import tqdm
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

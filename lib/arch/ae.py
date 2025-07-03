@@ -391,7 +391,7 @@ def load_encoder2encoder(model,ckpt_pth):
     unexpected = load_result.unexpected_keys
 
     if not missing and not unexpected:
-        print("✅ All weights loaded successfully.")
+        print("✅ All weights loaded into encoder successfully.")
     else:
         print("⚠️ Some weights were not loaded exactly:")
         if missing:
@@ -470,6 +470,7 @@ def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth=None, mlp_weight_dict=N
             raise ValueError(f'Unknown param name {name}')
 
     convmlp_model.load_state_dict(new_state_dict)
+    print(f"✅all weiths loaded into convmlp successfully")
 
 def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth=None,mlp_weight_dict=None,dims=2):
     cnn = cmodel.cnn_encoder

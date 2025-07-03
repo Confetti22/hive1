@@ -8,60 +8,71 @@ from torchvision.transforms import v2
 import torch
 import os
 import random
+import pickle
+from scipy.ndimage import zoom
 
-class SimpleDataset(Dataset):
+class SegDataset(Dataset):
     def __init__(self, args,valid=False,use_ratio = 1):
         """
+        for 3d feats volume and corresponding mask
         amount : control the amount of data for training
         """
-        
         #filepath,trans,evalue_img=None,evalue_mode=False,amount=0.5
         self.e5 = args.e5
         # Set data paths based on configuration and mode
         self.data_path = args.e5_data_path_dir if self.e5 else args.data_path_dir
+        self.mask_path = args.e5_mask_path_dir if self.e5 else args.mask_path_dir
         self.valid_data_path = args.e5_valid_data_path_dir if self.e5 else args.valid_data_path_dir
-
+        self.valid_mask_path = args.e5_valid_data_path_dir if self.e5 else args.valid_mask_path_dir
         self.valid = valid
+        self.feats_level = args.feats_level
+        self.feats_avg_kernel = args.feats_avg_kernel
 
         # Determine the file path to use (training or validation)
-        current_path = self.valid_data_path if self.valid else self.data_path
+        current_data_path = self.valid_data_path if self.valid else self.data_path
+        current_mask_path = self.valid_mask_path if self.valid else self.mask_path
 
         # Collect files ending with `.tif`
-        self.files = [os.path.join(current_path, fname) for fname in os.listdir(current_path) if fname.endswith('.tif')]
-        random.shuffle(self.files)
+        self.files = [os.path.join(current_data_path, fname) for fname in os.listdir(current_data_path) if fname.endswith('.pkl')]
+        self.masks_files= [os.path.join(current_mask_path, fname) for fname in os.listdir(current_mask_path) if fname.endswith('.tif')]
+
         self.files  = self.files[:int(use_ratio*len(self.files))]
+        self.mask_files  = self.masks_files[:int(use_ratio*len(self.masks_files))]
         print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files)}#####")
 
     def __len__(self):
- 
         return len(self.files) 
 
 
     def __getitem__(self,idx) :
 
-        roi = tif.imread(self.files[idx])
-        roi = np.array(roi).astype(np.float32) 
+        with open(self.files[idx],"rb") as f:
+            feats = pickle.load(f) #shape (C,D,H,W)
 
-        # if self.is_norm:
-        #     roi = self.clip_norm(roi,clip_low=self.clip_low,clip_high=self.clip_high)
-        # else:
-        #     roi =self.clip(roi,clip_low=self.clip_low,clip_high=self.clip_high)
-        roi=torch.from_numpy(roi)
-        roi=torch.unsqueeze(roi,0)
+        feats  = torch.from_numpy(feats)
 
-        return roi
+
+        #taylor the mask with the same shape as the feats
+        mask = tif.imread(self.mask_files[idx])
+        mask = zoom(mask,zoom=1/(2**self.feats_level),order=1)
+        crop_size = int((self.feats_avg_kernel -1)/2)
+        mask = mask[crop_size:-crop_size,:,:,:]
+        mask = torch.from_numpy(mask) #shape (D,H,W)
+        mask = mask -1 # class number rearrange from 0 to N-1
+
+        return feats,mask
 
 def get_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = SimpleDataset(args, use_ratio=1)
+    train_dataset = SegDataset(args, use_ratio=1)
 
     return train_dataset
 
 def get_valid_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = SimpleDataset(args,valid=True,use_ratio =0.2)
+    train_dataset = SegDataset(args,valid=True,use_ratio =0.2)
 
     return train_dataset
 

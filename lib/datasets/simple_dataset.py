@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/home/confetti/e5_workspace/brain_region_unet_contrastive_encoder")
+sys.path.append("/home/confetti/e5_workspace/hive1")
 
 import numpy as np
 import tifffile as tif
@@ -27,8 +27,15 @@ class SimpleDataset(Dataset):
         current_path = self.valid_data_path if self.valid else self.data_path
 
         # Collect files ending with `.tif`
-        self.files = [os.path.join(current_path, fname) for fname in os.listdir(current_path) if fname.endswith('.tif')]
-        random.shuffle(self.files)
+        # self.files = [os.path.join(current_path, fname) for fname in os.listdir(current_path) if fname.endswith('.tif')]
+
+        self.files = sorted(
+                            [os.path.join(current_path, fname) 
+                            for fname in os.listdir(current_path) 
+                            if fname.endswith('.tiff')],
+                            key=lambda x: int(os.path.basename(x)[:4])
+                        )
+        # random.shuffle(self.files)
         self.files  = self.files[:int(use_ratio*len(self.files))]
         print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files)}#####")
 
