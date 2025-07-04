@@ -160,9 +160,9 @@ for idx, img in enumerate(tqdm(loader)):
     feats_lst = np.moveaxis(feats,0,-1)
     feats_lst = feats_lst.reshape(-1,feats.shape[0])
     rgb_img=three_pca_as_rgb_image(feats_lst,spatial_shape) 
-    with open(f"{feats_save_dir}/feats_{idx}.pkl",'wb') as f:
+    with open(f"{feats_save_dir}/{idx:04d}_feats.pkl",'wb') as f:
         pickle.dump(feats,f)
-    tif.imwrite(f"{feats_save_dir}/rgb_feats_{idx}.tif",rgb_img)
+    tif.imwrite(f"{feats_save_dir}/{idx:04d}_rgb_feats.tif",rgb_img)
 
 
 

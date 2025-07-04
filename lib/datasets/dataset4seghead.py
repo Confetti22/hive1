@@ -33,8 +33,20 @@ class SegDataset(Dataset):
         current_mask_path = self.valid_mask_path if self.valid else self.mask_path
 
         # Collect files ending with `.tif`
-        self.files = [os.path.join(current_data_path, fname) for fname in os.listdir(current_data_path) if fname.endswith('.pkl')]
-        self.masks_files= [os.path.join(current_mask_path, fname) for fname in os.listdir(current_mask_path) if fname.endswith('.tif')]
+        self.files = sorted(
+            [os.path.join(current_data_path, fname) 
+            for fname in os.listdir(current_data_path) 
+            if fname.endswith('.pkl')],
+            key=lambda x: int(os.path.basename(x)[:4])
+        )
+
+        self.masks_files = sorted(
+            [os.path.join(current_mask_path, fname) 
+            for fname in os.listdir(current_mask_path) 
+            if fname.endswith('.tiff')],
+            key=lambda x: int(os.path.basename(x)[:4])
+        )
+
 
         self.files  = self.files[:int(use_ratio*len(self.files))]
         self.mask_files  = self.masks_files[:int(use_ratio*len(self.masks_files))]
@@ -54,10 +66,10 @@ class SegDataset(Dataset):
 
         #taylor the mask with the same shape as the feats
         mask = tif.imread(self.mask_files[idx])
-        mask = zoom(mask,zoom=1/(2**self.feats_level),order=1)
+        mask = zoom(mask,zoom=1/(2**self.feats_level),order=0)
         crop_size = int((self.feats_avg_kernel -1)/2)
-        mask = mask[crop_size:-crop_size,:,:,:]
-        mask = torch.from_numpy(mask) #shape (D,H,W)
+        mask = mask[crop_size:-crop_size,crop_size:-crop_size,crop_size:-crop_size]
+        mask = torch.from_numpy(mask).long() #shape (D,H,W)
         mask = mask -1 # class number rearrange from 0 to N-1
 
         return feats,mask
@@ -72,7 +84,7 @@ def get_dataset(args):
 def get_valid_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args,valid=True,use_ratio =0.2)
+    train_dataset = SegDataset(args,valid=True,use_ratio =1)
 
     return train_dataset
 
