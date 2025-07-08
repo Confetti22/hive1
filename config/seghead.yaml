@@ -29,6 +29,9 @@ avg_pool_padding: False
 #for seghead
 feats_level: 3
 feats_avg_kernel: 7
+in_channels: 12
+num_classes: 8
+use_focal: True
 
 # loss:
 loss_name: l1 # for ae reconstruction loss 
@@ -77,5 +80,4 @@ d_near: 4
 loss_enhance: True 
 re_use: False 
 exp_save_dir: "outs/contrastive_run_rm009"
-num_classes: 8
 
