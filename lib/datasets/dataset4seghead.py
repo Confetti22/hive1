@@ -10,6 +10,7 @@ import os
 import random
 import pickle
 from scipy.ndimage import zoom
+from pathlib import Path
 
 class SegDataset(Dataset):
     def __init__(self, args,valid=False,use_ratio = 1):
@@ -33,10 +34,13 @@ class SegDataset(Dataset):
         current_mask_path = self.valid_mask_path if self.valid else self.mask_path
 
         # Collect files ending with `.tif`
+
+        valid_exts = ('.tif', '.tiff', '.pkl')          # any you want to keep
+
         self.files = sorted(
             [os.path.join(current_data_path, fname) 
             for fname in os.listdir(current_data_path) 
-            if fname.endswith('.pkl')],
+            if fname.endswith(valid_exts)],
             key=lambda x: int(os.path.basename(x)[:4])
         )
 
@@ -57,11 +61,18 @@ class SegDataset(Dataset):
 
 
     def __getitem__(self,idx) :
-
-        with open(self.files[idx],"rb") as f:
-            feats = pickle.load(f) #shape (C,D,H,W)
-
-        feats  = torch.from_numpy(feats)
+        fname = Path(self.files[idx])
+        suffix = fname.suffix.lower()
+        # ---------- load ---------------------------------------------------------
+        if suffix == ".pkl":
+            with fname.open("rb") as f:
+                arr = pickle.load(f)            # numpy array shape (C,D,H,W)
+        elif suffix in {".tif", ".tiff"}:
+            arr = tif.imread(fname)            # (D,H,W) or (Z,H,W)
+            arr = np.expand_dims(arr,0)
+        else:
+            raise ValueError(f"Unsupported file type: {fname}")
+        feats  = torch.from_numpy(arr).float()
 
 
         #taylor the mask with the same shape as the feats

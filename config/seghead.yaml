@@ -53,9 +53,9 @@ dataset_name: 'simple_dataset'
 batch_per_gpu: 256 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/l3_pool7_postopk"
+data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/l3_pool7_postopk_1000"
 mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/masks"
-valid_data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool7_postopk"
+valid_data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool7_postopk_1000"
 valid_mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/masks"
 
 e5_data_path_dir: "/share/home/shiqiz/data/rm009/roi_whole_brain4"
@@ -63,18 +63,19 @@ e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/valid_roi"
 
 
 #for mlp contrastive_learning
-num_epochs: 4000
+num_epochs: 8000
 num_pairs: 16384 
 start_epoch: 0
 batch_size: 4096 
 shuffle_very_epoch: 50 
 valid_very_epoch: 50
+save_very_epoch: 50
 n_views: 4 
 pos_weight_ratio: 2
 # raw_img: 4um  feats_map: 16stride --> 64 um resol in feats_map
 d_near: 4 
 loss_enhance: True 
-re_use: True 
+re_use: False 
 exp_save_dir: "outs/contrastive_run_rm009"
 num_classes: 8
 

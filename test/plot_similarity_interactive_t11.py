@@ -23,7 +23,7 @@ cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
 # cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
 cnn_ckpt_pth = '/home/confetti/data/weights/rm009_3d_ae_best.pth'
-mlp_ckpt_pth ='/home/confetti/e5_workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_2049.pth'
+mlp_ckpt_pth ='/home/confetti/e5_workspace/hive/contrastive_run_rm009/batch4096_nview2_pos_weight_2_mlp[96, 48, 24, 12]_d_near1/model_epoch_2349.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
 encoder_model = build_encoder_model(args,dims=3) 

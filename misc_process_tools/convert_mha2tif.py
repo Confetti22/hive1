@@ -128,8 +128,11 @@ from config.load_config import load_cfg
 from lib.arch.ae import  load_compose_encoder_dict,build_final_model
 device ='cuda'
 args = load_cfg('config/seghead.yaml')
-exp_name ='postopk'
-feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg/l3_pool7_{exp_name}"
+args.filters = [32,64,96]
+args.mlp_filters =[96,48,24,12]
+
+exp_name ='postopk_1000'
+feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool7_{exp_name}"
 os.makedirs(feats_save_dir,exist_ok=True)
 
 dataset = get_dataset(args)
@@ -148,7 +151,7 @@ cmpsd_model.eval().to(device)
 
 # the latter conv_layer parameters will not be loaded
 cnn_ckpt_pth = f'{data_prefix}/weights/rm009_3d_ae_best.pth'
-mlp_ckpt_pth =f'{data_prefix}/weights/rm009_postopk.pth'
+mlp_ckpt_pth =f'{data_prefix}/weights/rm009_postopk_1000.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
 from confettii.plot_helper import three_pca_as_rgb_image

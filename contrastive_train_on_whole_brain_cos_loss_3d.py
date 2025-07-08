@@ -1,11 +1,8 @@
 
 #%%
 
-from tqdm.auto import tqdm
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import ExponentialLR
-import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
@@ -38,7 +35,7 @@ d_near = args.d_near
 exp_save_dir = args.exp_save_dir
 only_pos = True 
 
-exp_name =f'__postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
+exp_name =f'postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 model_save_dir = f'{exp_save_dir}/{exp_name}'
@@ -85,7 +82,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0005)
 import re
 ##load the ckpt
 if args.re_use:
-    ckpt_pth = f"{workspace_prefix}/contrastive_run_rm009/fixed_pro_loss_mean/model_epoch_5.pth" 
+    ckpt_pth = f"{workspace_prefix}/outs/contrastive_run_rm009/postopk_8_numparis16384_batch4096_nview4_d_near4_shuffle50/model_epoch_1000.pth" 
     # Extract the epoch number from the filename
     match = re.search(r'model_epoch_(\d+)', ckpt_pth)
     if match:
