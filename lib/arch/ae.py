@@ -391,13 +391,14 @@ def load_encoder2encoder(model,ckpt_pth):
     unexpected = load_result.unexpected_keys
 
     if not missing and not unexpected:
-        print("✅ All weights loaded into encoder successfully.")
+        print("✅ All weights loaded successfully.")
     else:
         print("⚠️ Some weights were not loaded exactly:")
         if missing:
             print(f"   • Missing keys ({len(missing)}):\n     {missing}")
         if unexpected:
             print(f"   • Unexpected keys ({len(unexpected)}):\n     {unexpected}")
+
 
     return load_result
 

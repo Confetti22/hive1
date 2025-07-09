@@ -16,7 +16,7 @@ import argparse
 import random
 import shutil
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Union
 
 import numpy as np
 import torch
@@ -47,30 +47,59 @@ from lib.arch.ae import build_final_model, load_compose_encoder_dict
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Contrastive 3-D feature training")
     p.add_argument("--cfg", type=str, default='config/rm009.yaml', help="Path to YAML config")
-    p.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume")
+    p.add_argument("--ckpt", type=str, default='/home/confetti/e5_workspace/hive1/outs/contrastive_run_rm009/v1_roi_postopk_3_numparis16384_batch2048_nview4_d_near6_shuffle50/model_epoch_280.pth', help="Checkpoint to resume")
     p.add_argument("--device", type=str, default="cuda", help="cuda | cpu | cuda:0 …")
     return p.parse_args()
-
-
-def set_seed(seed: int = 42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 
 def save_checkpoint(state: Dict, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(state, path)
 
+def load_checkpoint(
+    path: Union[str, Path],
+    model: nn.Module,
+    optimizer: optim.Optimizer | None = None,
+) -> int:
+    """
+    Load weights (and optionally optimizer state) from a checkpoint.
 
-def load_checkpoint(path: str | Path, model: nn.Module, optimizer: optim.Optimizer | None = None) -> int:
+    The checkpoint can be either …
+
+    1. A *plain* state-dict produced by ``torch.save(model.state_dict(), …)``  
+    2. A *wrapped* dict with keys like ``"model"``, ``"optim"``, and ``"epoch"``
+
+    Returns
+    -------
+    int
+        The epoch to resume from (0 if no epoch information is stored).
+    """
     ckpt = torch.load(path, map_location="cpu")
-    model.load_state_dict(ckpt["model"], strict=False)
+
+    # ───────────────────────────────────────────────────────────────── case 1 ──
+    # Raw state-dict: every value should be a tensor or a tensor-like buffer
+    if isinstance(ckpt, dict) and all(torch.is_tensor(v) or hasattr(v, "dtype")
+                                      for v in ckpt.values()):
+        model.load_state_dict(ckpt, strict=False)
+        return 0  # no epoch/optim info available
+
+    # ───────────────────────────────────────────────────────────────── case 2 ──
+    # Wrapped dict (common in custom training loops or Lightning)
+    state_dict = (
+        ckpt.get("model")           # our own training loop convention
+        or ckpt.get("state_dict")   # PyTorch-Lightning convention
+    )
+    if state_dict is None:
+        raise RuntimeError(
+            f"Checkpoint at {path} doesn’t contain a model state-dict."
+        )
+
+    model.load_state_dict(state_dict, strict=False)
+
     if optimizer and "optim" in ckpt:
         optimizer.load_state_dict(ckpt["optim"])
-    return ckpt.get("epoch", 0) + 1  # resume at *next* epoch
 
+    return ckpt.get("epoch", 0) + 1  # resume at *next* epoch
 
 # =============================================================================
 # Training helpers
@@ -95,6 +124,8 @@ def train_one_epoch(
 ):
     model.train()
     run_loss =  0.0
+    pos_cos_loss=  0.0
+    neg_cos_loss =  0.0
     for step, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch}", leave=False)):
         batch = torch.cat(batch, dim=0).to(device)  # [B*n_views, C]
         optimizer.zero_grad()
@@ -109,15 +140,15 @@ def train_one_epoch(
         optimizer.step()
 
         run_loss += loss.item()
-
-        it = epoch * len(loader) + step
-        writer.add_scalar("train/loss_iter", loss.item(), it)
-        writer.add_scalar("train/pos_cos", pos_cos.item(), it)
-        writer.add_scalar("train/neg_cos", neg_cos.item(), it)
-        writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], it)
+        pos_cos_loss +=pos_cos.item()
+        neg_cos_loss +=neg_cos.item()
 
     n_steps = len(loader)
-    writer.add_scalar("train/loss_epoch", run_loss / n_steps, epoch)
+    writer.add_scalar("train/loss", run_loss / n_steps, epoch)
+    writer.add_scalar("train/pos_cos", pos_cos_loss/ n_steps, epoch)
+    writer.add_scalar("train/neg_cos", neg_cos_loss/ n_steps, epoch)
+    writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], epoch)
+
 
 
 @torch.no_grad()
@@ -126,9 +157,7 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
              cnn_ckpt: Path, dims):
     # refresh composite encoder weights
     load_compose_encoder_dict(cmpsd_model, str(cnn_ckpt), mlp_weight_dict=model.state_dict(), dims=dims)
-    metrics = valid_from_roi(cmpsd_model, epoch, eval_data, writer)
-    for k, v in metrics.items():
-        writer.add_scalar(f"val/{k}", v, epoch)
+    valid_from_roi(cmpsd_model, epoch, eval_data, writer)
 
 
 # =============================================================================
@@ -136,40 +165,27 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
 # =============================================================================
 
 def main():
-    cli = parse_args()
-    cfg = load_cfg(cli.cfg)
-
-    # ---------------- seed & device ---------------- #
-    # set_seed(cfg.get("seed", 42))
-    device = torch.device(cli.device if torch.cuda.is_available() else "cpu")
-
+    args = parse_args()
+    cfg = load_cfg(args.cfg)
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = cfg.get(
-        "exp_name",
-        f"postopk_{avg_pool}_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}",
-    )
-    run_dir = Path(cfg.get("exp_save_dir", "outs")) / exp_name
-    (run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(cli.cfg, run_dir / "config.yaml")
+    exp_name = f"v1_roi_postopk_{avg_pool}_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}"
+    run_dir = Path("outs") / exp_name
+    ckpt_dir = run_dir / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(args.cfg, run_dir / "config.yaml")
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
     feats_name = "feats_z16176_z16299C4.zarr"
     feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
+    #load all the feats into memory if it can, will accelate indexing feats
+    feats_map = feats_map[:]
 
-    # initial dataset/loader
-    def make_loader() -> DataLoader:
-        ds = Contrastive_dataset_3d(
-            feats_map,
-            d_near=cfg.d_near,
-            num_pairs=cfg.num_pairs,
-            n_view=cfg.n_views,
-            verbose=False,
-        )
-        return DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, num_workers=cfg.get("num_workers", 4), pin_memory=True)
-
-    loader = make_loader()
+    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
+    loader = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, pin_memory=True)
 
     # ---------------- models ----------------------- #
     model = MLP(cfg.mlp_filters).to(device)
@@ -177,21 +193,14 @@ def main():
     cmpsd_model.eval()
 
     # --------------- optim & sched ----------------- #
-    optimizer = optim.Adam(model.parameters(), lr=cfg.get("lr_start", 5e-4))
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.get("lr_gamma", 0.95))
+    optimizer = optim.Adam(model.parameters(), lr=cfg.get("lr_start", 5e-3))
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.get("lr_gamma", 0.998))
 
     # --------------- resume logic ------------------ #
     start_epoch = 0
-    if cli.ckpt:
-        start_epoch = load_checkpoint(cli.ckpt, model, optimizer)
-        print(f"[INFO] Resumed from {cli.ckpt} (next epoch = {start_epoch})")
-    elif cfg.get("re_use", False):
-        ckpt_pth = Path(cfg.reuse_ckpt_path)
-        if ckpt_pth.exists():
-            start_epoch = load_checkpoint(ckpt_pth, model, optimizer)
-            print(f"[INFO] Re-used checkpoint {ckpt_pth} (next epoch = {start_epoch})")
-        else:
-            raise FileNotFoundError(f"re_use is True but {ckpt_pth} not found")
+    if args.ckpt:
+        start_epoch = load_checkpoint(args.ckpt, model, optimizer)
+        print(f"[INFO] Resumed from {args.ckpt} (next epoch = {start_epoch})")
 
     # ---------------- logging ---------------------- #
     writer = SummaryWriter(log_dir=run_dir / "tb")
@@ -218,13 +227,14 @@ def main():
 
         # reshuffle dataset
         if (epoch + 1) % shuffle_every == 0:
-            loader = make_loader()
+            ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
+            loader = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, pin_memory=True)
 
         # checkpoint
         if (epoch + 1) % ckpt_every == 0 or epoch + 1 == n_epochs:
             ckpt_path = run_dir / "checkpoints" / f"epoch_{epoch + 1:03d}.pth"
             save_checkpoint({"model": model.state_dict(), "optim": optimizer.state_dict(), "epoch": epoch}, ckpt_path)
-            print(f"[INFO] Saved checkpoint → {ckpt_path.relative_to(Path.cwd())}")
+            print(f"[INFO] Saved checkpoint → {ckpt_path}")
 
     # ---------------- finalize --------------------- #
     writer.close()

@@ -35,7 +35,7 @@ d_near = args.d_near
 exp_save_dir = args.exp_save_dir
 only_pos = True 
 
-exp_name =f'postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
+exp_name =f'v1_roi_postopk_{avg_pool}_numparis{num_pairs}_batch{batch_size}_nview{n_views}_d_near{d_near}_shuffle{shuffle_very_epoch}'
 
 writer = SummaryWriter(log_dir=f'{exp_save_dir}/{exp_name}')
 model_save_dir = f'{exp_save_dir}/{exp_name}'
@@ -66,13 +66,14 @@ z_arr = zarr.open_array(zarr_path,mode='a')
 #load entire array into memory to accelate indexing feats
 current = time.time()
 # image only extend to 300 at y axis, and only take the half brain at right
-feats_map = z_arr
+feats_map = z_arr[:]
 D,H,W,C = feats_map.shape
+
 print(f"read feats_map of shape{feats_map.shape} from zarr consume {time.time() -current}")
-
-dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False)
+#%%
+#for v1_roi, stride=4, mapped valid feature is rather small, set hy and hx here
+dataset = Contrastive_dataset_3d(feats_map,d_near=d_near,num_pairs=num_pairs,n_view=n_views,verbose= False,hy=874,hx=1312)
 dataloader = DataLoader(dataset=dataset,batch_size=batch_size,shuffle= True,drop_last=False)
-
 
 device= 'cuda'
 
@@ -91,7 +92,7 @@ if args.re_use:
         raise ValueError("Epoch number not found in checkpoint filename.")
 
     ckpt = torch.load(ckpt_pth, map_location='cpu')
-    print(ckpt.keys())
+    print(f"in re_use {ckpt.keys()=}")
     res = model.load_state_dict(ckpt)
     print()
 #%%

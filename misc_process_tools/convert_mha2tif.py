@@ -11,39 +11,40 @@ import tifffile as tif
 
 #%%
 ######## padding the roi_with 24(96um) at both z slice######
-# import os
-# import tifffile
-# import numpy as np
+import os
+import tifffile
+import numpy as np
 
-# # Directory containing the TIFF files
-# folder = "/home/confetti/data/rm009/rm009_roi/4"
+# Directory containing the TIFF files
+folder = "/home/confetti/data/rm009/rm009_roi/4"
 
-# # Define Z range
-# z_start = 16176
-# z_end = 16299
+# Define Z range
+z_start = 15984
+z_end = 16495
 
-# # Generate expected filenames
-# filenames = [f"Z{z:05d}_C4.tif" for z in range(z_start, z_end + 1)]
+# Generate expected filenames
+filenames = [f"Z{z:05d}_C4.tif" for z in range(z_start, z_end + 1)]
 
-# # Load and stack into a 3D array
-# volume_slices = []
-# for fname in filenames:
-#     fpath = os.path.join(folder, fname)
-#     if os.path.exists(fpath):
-#         img = tifffile.imread(fpath)
-#         volume_slices.append(img)
-#     else:
-#         raise FileNotFoundError(f"{fname} not found in directory.")
+# Load and stack into a 3D array
+volume_slices = []
+for fname in filenames:
+    fpath = os.path.join(folder, fname)
+    if os.path.exists(fpath):
+        img = tifffile.imread(fpath)
+        volume_slices.append(img)
+    else:
+        raise FileNotFoundError(f"{fname} not found in directory.")
 
-# # Stack into a 3D volume (Z, Y, X)
-# volume = np.stack(volume_slices, axis=0)
-# print("Volume shape:", volume.shape)  # (Z, Y, X)
-# print("Volume dtype:", volume.dtype)
-# tifffile.imwrite(f"/home/confetti/data/rm009/rm009_roi/z{z_start}_z{z_end}C4.tif",volume)
-# import tifffile as tif
-# old_mask = tif.imread("/home/confetti/data/rm009/rm009_roi/mask_77_3500_5250.tiff")
-# mask = np.pad(old_mask,((24, 23), (0, 0), (0, 0)), mode='constant', constant_values=0)
-# tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask_124_3500_5250.tiff",mask)
+# Stack into a 3D volume (Z, Y, X)
+volume = np.stack(volume_slices, axis=0)
+print("Volume shape:", volume.shape)  # (Z, Y, X)
+print("Volume dtype:", volume.dtype)
+tifffile.imwrite(f"/home/confetti/data/rm009/rm009_roi/z{z_start}_z{z_end}C4.tif",volume)
+#%%
+import tifffile as tif
+old_mask = tif.imread("/home/confetti/data/rm009/rm009_roi/mask_77_3500_5250.tiff")
+mask = np.pad(old_mask,((24, 23), (0, 0), (0, 0)), mode='constant', constant_values=0)
+tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask_124_3500_5250.tiff",mask)
 
 
 #%%

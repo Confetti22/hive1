@@ -223,32 +223,26 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("../config/rm009.yaml")
-avg_pool = 3
+cfg = load_cfg("config/rm009.yaml")
+avg_pool = 8
 cfg.avg_pool_size = [avg_pool] * 3
 
 model = build_encoder_model(cfg, dims=3)
 load_encoder2encoder(model, "/home/confetti/data/weights/rm009_3d_ae_best.pth")
 vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
-save_zarr_path = "/home/confetti/data/rm009/feats_z16176_z16299C4.zarr"
+save_zarr_path = "/home/confetti/data/rm009/feats_l2_avg8_z16176_z16299C4.zarr"
 #%%
 
 extract_features_to_zarr(
     vol_path= vol_path,
     model=model,
     zarr_path=save_zarr_path,
-    region_size=(64, 1536, 1536),
-    roi_size=(24,24,24),
-    roi_stride=(4,4,4),
+    region_size=(64, 1024, 1024),
+    roi_size=(32,32,32),
+    roi_stride=(8,8,8),
     batch_size=2048,
     device="cuda",
 )
-
-# --------------------------------------------------------------------- demo
-img_coord = (10000, 5000, 3000)  # arbitrary voxel in raw image space
-feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(16, 16, 16))
-print("Image coord", img_coord, "--> feature idx", feat_idx)
-
 
 
 #%%
@@ -319,5 +313,5 @@ summarise_zarr(save_zarr_path)
 plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True)
 #%%
 img_coord = (120,3499,5250)  # arbitrary voxel in raw image space
-feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(4,4,4))
+feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(8,8,8))
 print("Image coord", img_coord, "--> feature idx", feat_idx)

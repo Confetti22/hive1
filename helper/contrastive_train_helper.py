@@ -559,47 +559,60 @@ def get_rm009_eval_data(E5,):
     return eval_datas
 
 
-def valid_from_roi(model,it,eval_data,writer):
-    "eval from roi"
+def valid_from_roi(model, it, eval_data, writer):
+    """Evaluate a model on a list of ROIs.
+
+    Works with feature tensors of shape:
+        • (C, H, W)                      – old behaviour
+        • (C, D, H, W)                  – channel-first 3-D
+        • (D, H, W, C)                  – channel-last 3-D
+    For 3-D inputs, the middle depth slice (z = D//2) is used for PCA/t-SNE.
+    """
     model.eval()
-    ncc_valid_imgs=[]
-    pca_img_lst=[]
-    ncc_seedpoints_idx_lsts =[]
-    tsne_encoded_feats_lst4tsne=[]
-    tsne_label_lst4tsne=[]
-    for idx,data_dic in enumerate(eval_data):
-        roi = data_dic['img']
-        label= data_dic['label']
-        idxes = data_dic.get('loc_idx', [])
 
-        input = torch.from_numpy(roi).unsqueeze(0).unsqueeze(0).float().to('cuda')
-        outs = model(input).cpu().detach().squeeze().numpy() #C*H*W    D will equals to 1 and is ignored
-        feats_map = np.moveaxis(outs,0,-1) #H*W*C
-        H,W,C = feats_map.shape
-        feats_list = feats_map.reshape(-1, C)
+    ncc_valid_imgs            = []
+    pca_img_lst               = []
+    ncc_seedpoints_idx_lsts   = []
+    tsne_encoded_feats_lst    = []
+    tsne_label_lst            = []
 
-        #rgb_plot
-        rgb_img = three_pca_as_rgb_image(feats_list,(H,W))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    for idx, data_dic in enumerate(eval_data):
+        roi      = data_dic['img']          # numpy (H,W) or (D,H,W)
+        label    = data_dic['label']
+        idxes    = data_dic.get('loc_idx', [])
+
+        inp = torch.from_numpy(roi).unsqueeze(0).unsqueeze(0).float().to(device)
+        outs = model(inp).detach().cpu().numpy().squeeze()        # np.ndarray
+
+        if outs.ndim == 3:                                  # (C, H, W)
+            feats_map = np.moveaxis(outs, 0, -1)            # → (H, W, C)
+        elif outs.ndim == 4:
+            C, D, H, W = outs.shape
+            z_mid = D // 2
+            feats_map = np.moveaxis(outs[:, z_mid], 0, -1)   # (H, W, C)
+        H, W, C = feats_map.shape
+        feats_flat = feats_map.reshape(-1, C)
+        # ---------------------------------------------------------------- visualisations
+        rgb_img = three_pca_as_rgb_image(feats_flat, (H, W))
         pca_img_lst.append(rgb_img)
-
-        #tsne_plot
-        tsne_encoded_feats_lst4tsne.append(feats_list)
-
-        #ncc_plot
+        tsne_encoded_feats_lst.append(feats_flat)
+        # ---------------------------------------------------------------- NCC plots
         if len(idxes) > 0:
-            ncc_lst = compute_ncc_map(idxes,feats_list, shape = (H,W))
-            ncc_valid_imgs.extend(ncc_lst)
+            ncc_imgs = compute_ncc_map(idxes, feats_flat, shape=(H, W))
+            ncc_valid_imgs.extend(ncc_imgs)
             ncc_seedpoints_idx_lsts.extend(idxes)
             rows, cols = np.indices((H, W))
             locations = np.stack([rows.ravel(), cols.ravel()], axis=1)
+        # ---------------------------------------------------------------- labels (resampled to H×W)
+        zoom_factor = [y / x for y, x in zip((H, W), label.shape)]
+        label_rs    = zoom(label, zoom_factor, order=0)
+        tsne_label_lst.append(label_rs.ravel())
 
-        zoom_factor = [ y/x for y,x in zip([H,W],label.shape)]
-        label = zoom(label,zoom_factor,order=0)
-        tsne_label_lst4tsne.append(label.ravel())
-
-
-    tsne_grid_plot(tsne_encoded_feats_lst4tsne,tsne_label_lst4tsne,writer,tag=f'tsne',step =it)
-    plot_pca_maps(pca_img_lst, writer=writer, tag=f"pca",step=it,ncols=idx+1)
+    # ---------- logging ----------
+    # tsne_grid_plot(tsne_encoded_feats_lst,tsne_label_lst,writer,tag='tsne',step=1)
+    plot_pca_maps(pca_img_lst,writer=writer,tag='pca',step=it,ncols=len(pca_img_lst))
 
     if len(idxes) > 0: 
         plot_ncc_maps(ncc_valid_imgs, ncc_seedpoints_idx_lsts,locations,writer=writer, tag=f"ncc",step=it,ncols=len(idxes))
