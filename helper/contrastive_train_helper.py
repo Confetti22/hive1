@@ -133,61 +133,104 @@ class Contrastive_dataset_3d_fix_paris(Dataset):
         new_loc = loc + shift
         return np.clip(new_loc, [0, 0, 0], np.array(self.feats_map.shape[:3]) - 1)  # Ensure valid bounds
 
+import numpy as np
+import random
+import torch
+from torch.utils.data import Dataset
+
 class Contrastive_dataset_3d(Dataset):
     """
-    Supports both 4D (D, H, W, C) and 3D (H, W, C) feature maps.
+    Supports both 4-D (D, H, W, C) and 3-D (H, W, C) feature maps.
+
+    Optional region-of-interest limits:
+        lz, ly, lx – inclusive lower bounds
+        hz, hy, hx – exclusive  upper bounds
+
+    If any bound is None it is computed from d_near + margin.
     """
-    def __init__(self, feats_map, d_near, num_pairs, n_view=2, verbose=False,margin=10):
+    def __init__(
+        self,
+        feats_map,
+        d_near: int,
+        num_pairs: int,
+        n_view: int = 2,
+        *,
+        verbose: bool = False,
+        margin: int = 10,
+        lz: int | None = None,
+        ly: int | None = None,
+        lx: int | None = None,
+        hz: int | None = None,
+        hy: int | None = None,
+        hx: int | None = None,
+    ):
         self.feats_map = feats_map
-        self.dims = feats_map.ndim - 1  # 3D (volumetric) or 2D (single slice)
+        self.dims = feats_map.ndim - 1  # 3-D (volumetric) or 2-D (single slice)
         self.verbose = verbose
         self.n_view = n_view
         d_near = int(d_near)
-        
 
         if self.dims == 3:
             D, H, W, C = feats_map.shape
-            lx, hx = d_near + margin, D - d_near - margin
-            ly, hy = d_near + margin, H - d_near - margin
-            lz, hz = d_near + margin, W - d_near - margin
+            # --------- derive bounds (fallback to auto-computed) ----------
+            lz = lz if lz is not None else d_near + margin
+            ly = ly if ly is not None else d_near + margin
+            lx = lx if lx is not None else d_near + margin
+            hz = hz if hz is not None else D - d_near - margin
+            hy = hy if hy is not None else H - d_near - margin
+            hx = hx if hx is not None else W - d_near - margin
+
+            if not (0 <= lz < hz <= D and 0 <= ly < hy <= H and 0 <= lx < hx <= W):
+                raise ValueError("Sampling bounds are out of volume range.")
+
             self.loc_lst = np.stack([
-                np.random.randint(lx, hx, size=num_pairs),
+                np.random.randint(lz, hz, size=num_pairs),
                 np.random.randint(ly, hy, size=num_pairs),
-                np.random.randint(lz, hz, size=num_pairs)
+                np.random.randint(lx, hx, size=num_pairs)
             ], axis=1)
+
         elif self.dims == 2:
             H, W, C = feats_map.shape
-            ly, hy = d_near + margin, H - d_near - margin
-            lz, hz = d_near + margin, W - d_near - margin
+            ly = ly if ly is not None else d_near + margin
+            lx = lx if lx is not None else d_near + margin
+            hy = hy if hy is not None else H - d_near - margin
+            hx = hx if hx is not None else W - d_near - margin
+
+            if not (0 <= ly < hy <= H and 0 <= lx < hx <= W):
+                raise ValueError("Sampling bounds are out of image range.")
+
             self.loc_lst = np.stack([
                 np.random.randint(ly, hy, size=num_pairs),
-                np.random.randint(lz, hz, size=num_pairs)
+                np.random.randint(lx, hx, size=num_pairs)
             ], axis=1)
+
         else:
-            raise ValueError("Feature map must be either 4D (D, H, W, C) or 3D (H, W, C).")
+            raise ValueError("Feature map must be 4-D (D, H, W, C) or 3-D (H, W, C).")
 
         self.sample_num = num_pairs
         self.all_near_shifts = generate_sphereshell__shifts(R=d_near, r=0, dims=self.dims)
 
+    # ------------------------------------------------------------------ required
     def __len__(self):
         return self.sample_num
 
     def __getitem__(self, idx):
         loc = self.loc_lst[idx]
-        feat = torch.from_numpy(self.get_feats_given_loc(loc)).float()
-        pair_locs = [self.positive_pair_loc_generate(loc) for _ in range(self.n_view - 1)]
-        pair_feats = [torch.from_numpy(self.get_feats_given_loc(pl)).float() for pl in pair_locs]
+        feat = torch.from_numpy(self._get_feats_given_loc(loc)).float()
+        pair_locs = [self._positive_pair_loc_generate(loc) for _ in range(self.n_view - 1)]
+        pair_feats = [torch.from_numpy(self._get_feats_given_loc(pl)).float() for pl in pair_locs]
         return [feat] + pair_feats
 
-    def get_feats_given_loc(self, loc):
+    # ------------------------------------------------------------------ helpers
+    def _get_feats_given_loc(self, loc):
         if self.dims == 3:
             z, y, x = loc
             return self.feats_map[z, y, x, :]
-        elif self.dims == 2:
+        else:  # dims == 2
             y, x = loc
             return self.feats_map[y, x, :]
 
-    def positive_pair_loc_generate(self, loc):
+    def _positive_pair_loc_generate(self, loc):
         shift = random.choice(self.all_near_shifts)
         return loc + shift
 

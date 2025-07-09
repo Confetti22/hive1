@@ -230,7 +230,7 @@ cfg.avg_pool_size = [avg_pool] * 3
 model = build_encoder_model(cfg, dims=3)
 load_encoder2encoder(model, "/home/confetti/data/weights/rm009_3d_ae_best.pth")
 vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
-save_zarr_path = "/home/confetti/data/rm009/rm009_roi/feats_z16176_z16299C4.zarr"
+save_zarr_path = "/home/confetti/data/rm009/feats_z16176_z16299C4.zarr"
 #%%
 
 extract_features_to_zarr(
