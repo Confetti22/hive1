@@ -173,10 +173,10 @@ class Contrastive_dataset_3d(Dataset):
         if self.dims == 3:
             D, H, W, C = feats_map.shape
             # --------- derive bounds (fallback to auto-computed) ----------
-            lz = lz if lz is not None else d_near + margin
+            lz = lz if lz is not None else d_near 
             ly = ly if ly is not None else d_near + margin
             lx = lx if lx is not None else d_near + margin
-            hz = hz if hz is not None else D - d_near - margin
+            hz = hz if hz is not None else D - d_near 
             hy = hy if hy is not None else H - d_near - margin
             hx = hx if hx is not None else W - d_near - margin
 

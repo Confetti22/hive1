@@ -47,7 +47,7 @@ from lib.arch.ae import build_final_model, load_compose_encoder_dict
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Contrastive 3-D feature training")
     p.add_argument("--cfg", type=str, default='config/rm009.yaml', help="Path to YAML config")
-    p.add_argument("--ckpt", type=str, default='/home/confetti/e5_workspace/hive1/outs/contrastive_run_rm009/v1_roi_postopk_3_numparis16384_batch2048_nview4_d_near6_shuffle50/model_epoch_280.pth', help="Checkpoint to resume")
+    p.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume")
     p.add_argument("--device", type=str, default="cuda", help="cuda | cpu | cuda:0 …")
     return p.parse_args()
 
@@ -170,7 +170,7 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"v1_roi_postopk_{avg_pool}_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}"
+    exp_name = f"v1_l2_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}"
     run_dir = Path("outs") / exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -179,15 +179,19 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "feats_z16176_z16299C4.zarr"
+    feats_name = "feats_l2_avg8_z16176_z16299C4.zarr"
     feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
     feats_map = feats_map[:]
 
-    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
+    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False,hy=437,hx=656)
     loader = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, pin_memory=True)
 
     # ---------------- models ----------------------- #
+    level_key = 'l2'
+    filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,64,32,12]}
+    cfg.mlp_filters = filters_map[level_key]
+
     model = MLP(cfg.mlp_filters).to(device)
     cmpsd_model = build_final_model(cfg).to(device)
     cmpsd_model.eval()

@@ -33,6 +33,7 @@ from tqdm.auto import tqdm
 import zarr
 from tifffile import TiffFile, memmap
 from confettii.feat_extract import SlidingWindowND
+from typing import Tuple, Union
 
 # -----------------------------------------------------------------------------
 #                       I / O   a n d   v o l u m e   r e a d e r
@@ -115,32 +116,64 @@ def image_to_feature_coord(img_coord: Tuple[int, int, int], *,
 #                           F e a t u r e   e x t r a c t o r
 # -----------------------------------------------------------------------------
 
+
+# ────────────────────────────────────────────────────────── helpers
+def _lookup(module: nn.Module, attr_path: str) -> nn.Module:
+    tgt = module
+    for attr in attr_path.split("."):
+        tgt = getattr(tgt, attr) if attr else tgt
+    return tgt
+
+
+def _register_hook(layer: nn.Module, buffer: dict[str, torch.Tensor]):
+    def hook(_, __, out):
+        buffer["feat"] = out.detach()
+
+    return layer.register_forward_hook(hook)
+
+
+# ───────────────────────────────────────────────── extract
 def extract_features_to_zarr(
     *,
-    vol_path: str | Path,
+    vol_path: Union[str, Path],
     model: nn.Module,
-    zarr_path: str | Path,
+    zarr_path: Union[str, Path],
     region_size: Tuple[int, int, int],
     roi_size: Tuple[int, int, int],
     roi_stride: Tuple[int, int, int],
     batch_size: int = 256,
     device: str = "cuda",
+    # NEW ↓
+    layer_path: str = "",           # path to layer inside the model (“” = model output)
+    pool_size: int | None = None,   # e.g. 4 → AvgPool3d(4, stride=1)
 ) -> None:
-    """Slide through *vol_path*, extract CNN features and store them in a Zarr array.
-
-    The function supports volumes that **do not** divide evenly by the tiling
-    parameters – the last tiles are padded on the high side.
-    """
-
+    """Extract a *single* feature map (optionally pooled) and store it in Zarr."""
     model.eval().to(device)
 
-    step = [int(2*(1/2)*r_size/r_stride -1) for r_size, r_stride in zip(roi_size,roi_stride) ]
-    step_size = roi_stride
-    margin = [int(s * s_size) for s,s_size in zip(step,step_size)]
-    region_stride  = [int(r_size - m) for r_size, m in zip(region_size,margin)]
+    # Hook the requested layer
+    layer = model if layer_path == "" else _lookup(model, layer_path)
+    activ: dict[str, torch.Tensor] = {}
+    handle = _register_hook(layer, activ)
+
+    pool = None
+    if pool_size and pool_size > 1:
+        pool = nn.AvgPool3d(kernel_size=[pool_size] * 3, stride=1, padding=0).to(device)
+
+    # ---------------------------------------------------------------- size probe
+    with torch.no_grad():
+        dummy = torch.zeros(1, 1, *roi_size, device=device)
+        _ = model(dummy)
+        feat_sample = activ["feat"]
+        if pool:
+            feat_sample = pool(feat_sample)
+        feat_dim = feat_sample.numel()
+
+    # ───────────────────────────── Zarr grid bookkeeping (unchanged logic)
+    step = [int(2 * (1 / 2) * r_size / r_stride - 1) for r_size, r_stride in zip(roi_size, roi_stride)]
+    margin = [int(s * s_size) for s, s_size in zip(step, roi_stride)]
+    region_stride = [int(r_size - m) for r_size, m in zip(region_size, margin)]
 
     with VolumeReader(vol_path) as volume:
-        # ----------------------------------------------------------------- grid
         d, h, w = volume.shape
         num_blocks = [
             math.ceil((d - region_size[0]) / region_stride[0]) + 1,
@@ -148,65 +181,59 @@ def extract_features_to_zarr(
             math.ceil((w - region_size[2]) / region_stride[2]) + 1,
         ]
 
-        # Number of feature vectors *per* block
         chunk_shape = [
             math.floor((region_size[0] - roi_size[0]) / roi_stride[0]) + 1,
             math.floor((region_size[1] - roi_size[1]) / roi_stride[1]) + 1,
             math.floor((region_size[2] - roi_size[2]) / roi_stride[2]) + 1,
         ]
 
-        # Extract feature dimension from a dummy forward
-        with torch.no_grad():
-            dummy = torch.zeros(1, 1, *roi_size, device=device)
-            feat_dim = model(dummy).numel()
-
         zarr_shape = tuple(nb * cs for nb, cs in zip(num_blocks, chunk_shape)) + (feat_dim,)
         zarr_chunk = tuple(chunk_shape) + (feat_dim,)
-
         store = zarr.open(str(zarr_path), mode="w", shape=zarr_shape, dtype="float32", chunks=zarr_chunk)
 
-        total_blocks = math.prod(num_blocks)
-        pbar = tqdm(total=total_blocks, desc="Feature extraction", unit="block")
+        pbar = tqdm(total=math.prod(num_blocks), unit="block", desc="Feature extraction")
 
-        # ----------------------------------------------------------- iterate grid
+        # --------------------------------------------------- iterate volume grid
         for bz in range(num_blocks[0]):
             for by in range(num_blocks[1]):
                 for bx in range(num_blocks[2]):
-                    # ------------------------------------------------- offsets
-                    z_off = bz * region_stride[0]
-                    y_off = by * region_stride[1]
-                    x_off = bx * region_stride[2]
-                    offset = (z_off, y_off, x_off)
-
+                    offset = (
+                        bz * region_stride[0],
+                        by * region_stride[1],
+                        bx * region_stride[2],
+                    )
                     block = volume.read_block(offset=offset, size=region_size)
 
-                    # Pad high side if we ran beyond volume edge
-                    pad_z = max(0, region_size[0] - block.shape[0])
-                    pad_y = max(0, region_size[1] - block.shape[1])
-                    pad_x = max(0, region_size[2] - block.shape[2])
-                    if pad_z or pad_y or pad_x:
-                        block = np.pad(block, ((0, pad_z), (0, pad_y), (0, pad_x)), mode="constant")
+                    pad = [max(0, region_size[i] - block.shape[i]) for i in range(3)]
+                    if any(pad):
+                        block = np.pad(block, [(0, pad[0]), (0, pad[1]), (0, pad[2])], mode="constant")
 
                     dataset = SlidingWindowND(block, window=roi_size, stride=roi_stride)
                     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
-                    feats = []
+                    feats_all = []
                     with torch.no_grad():
                         for patches in loader:
                             patches = patches.to(device)
-                            out = model(patches)  # shape: [B, feat_dim]
-                            feats.append(out.cpu().numpy())
-                    feats_block = np.concatenate(feats, axis=0).reshape(*chunk_shape, feat_dim)
+                            _ = model(patches)            # fills activ["feat"]
+                            feat = activ["feat"]
+                            if pool:
+                                feat = pool(feat)
+                            feats_all.append(feat.flatten(1).cpu())  # [B, feat_dim]
 
-                    # -------------------------------------------- write to Zarr
-                    z_slice = slice(bz * chunk_shape[0], (bz + 1) * chunk_shape[0])
-                    y_slice = slice(by * chunk_shape[1], (by + 1) * chunk_shape[1])
-                    x_slice = slice(bx * chunk_shape[2], (bx + 1) * chunk_shape[2])
-                    store[z_slice, y_slice, x_slice, :] = feats_block.astype("float32")
+                    feats_block = torch.cat(feats_all, dim=0).numpy().reshape(*chunk_shape, feat_dim)
+
+                    store[
+                        slice(bz * chunk_shape[0], (bz + 1) * chunk_shape[0]),
+                        slice(by * chunk_shape[1], (by + 1) * chunk_shape[1]),
+                        slice(bx * chunk_shape[2], (bx + 1) * chunk_shape[2]),
+                        :
+                    ] = feats_block.astype("float32")
 
                     pbar.update(1)
         pbar.close()
 
+    handle.remove()
     print(f"Finished – features saved to {zarr_path}")
 
 # -----------------------------------------------------------------------------
@@ -223,8 +250,8 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("config/rm009.yaml")
-avg_pool = 8
+cfg = load_cfg("../config/rm009.yaml")
+avg_pool = None
 cfg.avg_pool_size = [avg_pool] * 3
 
 model = build_encoder_model(cfg, dims=3)
@@ -242,6 +269,8 @@ extract_features_to_zarr(
     roi_stride=(8,8,8),
     batch_size=2048,
     device="cuda",
+    layer_path="down_layers.0",  # pick *one* internal layer
+    pool_size=8,                 # or None / 1 for “no pooling”
 )
 
 

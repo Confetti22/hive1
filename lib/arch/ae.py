@@ -130,7 +130,7 @@ def make_block(in_ch, out_ch, ks, stride, padding, block_type, dim, trans, share
 
 class EncoderND(nn.Module):
     def __init__(self, in_channel, filters, kernel_size, dimension=3,
-                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None, avg_pool_padding=False):
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None, avg_pool_padding=False,last_encoder=True):
         super().__init__()
         self.dim = dimension
         self.depth = len(filters)
@@ -157,13 +157,17 @@ class EncoderND(nn.Module):
                                shared_kwargs=self.shared_kwargs)
             self.down_layers.append(block)
 
-        self.last_encoder_conv = Conv(filters[-1], filters[-1], kernel_size=1)
+        if last_encoder:
+            self.last_encoder_conv = Conv(filters[-1], filters[-1], kernel_size=1)
+        else:
+            self.last_encoder_conv = None
 
     def forward(self, x):
         x = self.conv_in(x)
         for layer in self.down_layers:
             x = layer(x)
-        x = self.last_encoder_conv(x)
+        if self.last_encoder_conv:
+            x = self.last_encoder_conv(x)
 
         avg_pool_size = self.avg_pool_size
         apply_avg_flag = avg_pool_size[0]
@@ -289,10 +293,10 @@ class ConvMLP(nn.Module):
 
 class ComposedModel(nn.Module):
     def __init__(self, in_channel,cnn_filters, kernel_size,dims,mlp_filters, 
-                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size= None, avg_pool_padding=None):
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size= None, avg_pool_padding=None,last_encoder=True):
         super().__init__()
         self.cnn_encoder = EncoderND(in_channel, cnn_filters, kernel_size, dims,
-                                 pad_mode, act_mode, norm_mode, block_type,avg_pool_size=avg_pool_size,avg_pool_padding =avg_pool_padding)
+                                 pad_mode, act_mode, norm_mode, block_type,avg_pool_size=avg_pool_size,avg_pool_padding =avg_pool_padding,last_encoder=last_encoder)
         self.mlp_encoder = ConvMLP(mlp_filters,dims)
 
     def forward(self, x):
@@ -345,6 +349,7 @@ def build_encoder_model(args,dims):
         'norm_mode': args.norm_mode,
         'block_type': args.block_type,
         'avg_pool_size':args.avg_pool_size,
+        'last_encoder': args.last_encoder,
     }
 
     model = EncoderND(dimension=dims,**kwargs)
@@ -364,6 +369,7 @@ def build_final_model(args):
         'mlp_filters':args.mlp_filters,
         'avg_pool_size':args.avg_pool_size,
         'avg_pool_padding':args.avg_pool_padding,
+        'last_encoder': args.last_encoder,
     }
     model = ComposedModel(**kwargs)
     return model

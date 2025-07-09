@@ -14,17 +14,18 @@ dims : 3
 model_name: ae3
 architecture: ae
 block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
-filters: [32,64,96]  # filters number can not be the same consecutively
-kernel_size: [5,5,3]
+filters: [32,64]  # filters number can not be the same consecutively
+kernel_size: [5,5]
 in_planes: 1
 out_planes: 1 
 pad_mode: 'reflect'
 act_mode: 'elu'
 norm_mode: 'none'
 #_______for mlp_encoder_____
-mlp_filters: [96,48,24,12]
-avg_pool_size: [3,3,3] 
+mlp_filters: [64,32,24,12]
+avg_pool_size: [8,8,8] 
 avg_pool_padding: False
+last_encoder: False
 
 # loss:
 loss_name: l1 # for ae reconstruction loss 
