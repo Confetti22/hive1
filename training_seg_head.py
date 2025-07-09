@@ -21,8 +21,8 @@ from distance_contrast_helper import HTMLFigureLogger
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cfg", type=str, required=True,default='config/seghead.yaml', help="Path to YAML config")
-    parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume from")
+    parser.add_argument("--cfg", type=str, default='config/seghead.yaml', help="Path to YAML config")
+    parser.add_argument("--ckpt", type=str, default='/home/confetti/e5_workspace/hive1/outs/seg_head/level3_avg_pool8_fromepoch1000_focal_combo_loss/checkpoints/epoch_3650.pth', help="Checkpoint to resume from")
     parser.add_argument("--device", type=str, default="cuda")
     return parser.parse_args()
 

@@ -132,7 +132,7 @@ args.filters = [32,64,96]
 args.mlp_filters =[96,48,24,12]
 
 exp_name ='postopk_1000'
-feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool7_{exp_name}"
+feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool8_{exp_name}"
 os.makedirs(feats_save_dir,exist_ok=True)
 
 dataset = get_dataset(args)

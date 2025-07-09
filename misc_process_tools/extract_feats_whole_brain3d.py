@@ -1,35 +1,35 @@
 #%%
-
+import sys
+import os
+project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_dir)
+from lib.arch.ae import build_encoder_model,load_encoder2encoder
+from config.load_config import load_cfg
+#%%
 import torch
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import DataLoader
 import numpy as np
-from torchsummary import summary
-from pprint import pprint
 from tqdm.auto import tqdm
 import torch
 import torch.nn.functional as F
-import torch.nn as nn
 import time
 import zarr
-
-from lib.arch.ae import build_encoder_model,load_ae2encoder
-from config.load_config import load_cfg
 from confettii.feat_extract import TraverseDataset3d, get_feature_list
 
 device ='cuda'
-args = load_cfg('config/rm009.yaml')
+args = load_cfg('../config/rm009.yaml')
 "try avg on None, 5, 9"
-avg_pool = 8
+avg_pool = 3
 args.avg_pool_size = [avg_pool]*3
 print('\n\n\n\n')
 print(f"{args.avg_pool_size= }")
 
 E5 = False 
-cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
+cnn_ckpt_pth = '/home/confetti/data/weights/rm009_3d_ae_best.pth'
 cluster_ckpt_pth = '/share/home/shiqiz/data/rm009/ae.pth'
 cnn_ckpt_pth = cluster_ckpt_pth if E5 else cnn_ckpt_pth
 #%%
-log_pth = f'rm009_ae_out/logs/test_rm009/extrac_feats.log'
+log_pth = f'../outs/extract_feats/roi_level3_avg{avg_pool}.log'
 import sys
 from contextlib import redirect_stdout
 with open(log_pth, 'w') as f:
@@ -40,14 +40,14 @@ with open(log_pth, 'w') as f:
 #%%
 encoder_model = build_encoder_model(args, dims=3)
 encoder_model.eval().to(device)
-before_mean = encoder_model.conv_in[0].weight.mean().item()
-load_ae2encoder(encoder_model, cnn_ckpt_pth)
-after_mean = encoder_model.conv_in[0].weight.mean().item()
-print("Before loading:", before_mean)
-print("After loading:", after_mean)
+before_max = encoder_model.conv_in[0].weight.max().item()
+load_encoder2encoder(encoder_model, cnn_ckpt_pth)
+after_max = encoder_model.conv_in[0].weight.max().item()
+print("Before loading:", before_max)
+print("After loading:", after_max)
 
 # Assert to ensure they are the same
-assert not torch.isclose(torch.tensor(before_mean), torch.tensor(after_mean), atol=1e-6), \
+assert not torch.isclose(torch.tensor(before_max), torch.tensor(after_max), atol=1e-6), \
     f"weight dict load failed"
 
 from helper.image_reader import Ims_Image
@@ -73,11 +73,13 @@ print(f"whole_volume_offset{whole_volume_offset}")
 batch_size = 256 
 #%%
 
+# when extracting features in t11(resol=1um), the roi_size =64, roi_stride=16, 
+# so when processing the 4 um rm009, the roi_size = 16, roi_stride=4
 cnn_feature_dim =96
 mlp_feature_dim =12
 region_size=[64,1536,1536]
-roi_size =[64,64,64]
-roi_stride =[16,16,16]
+roi_size =[16,16,16]
+roi_stride =[4,4,4]
 step = [int(2*(1/2)*r_size/r_stride -1) for r_size, r_stride in zip(roi_size,roi_stride) ]
 step_size = roi_stride
 margin = [int(s * s_size) for s,s_size in zip(step,step_size)]

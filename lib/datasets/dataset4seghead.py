@@ -79,7 +79,11 @@ class SegDataset(Dataset):
         mask = tif.imread(self.mask_files[idx])
         mask = zoom(mask,zoom=1/(2**self.feats_level),order=0)
         crop_size = int((self.feats_avg_kernel -1)/2)
-        mask = mask[crop_size:-crop_size,crop_size:-crop_size,crop_size:-crop_size]
+        if self.feats_avg_kernel %2 ==0: #for even kernel size, the total crop_size is an odd number
+            mask = mask[crop_size+1:-crop_size,crop_size+1:-crop_size,crop_size+1:-crop_size]
+        else:
+            mask = mask[crop_size:-crop_size,crop_size:-crop_size,crop_size:-crop_size]
+    
         mask = torch.from_numpy(mask).long() #shape (D,H,W)
         mask = mask -1 # class number rearrange from 0 to N-1
 
