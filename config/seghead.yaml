@@ -25,9 +25,10 @@ norm_mode: 'none'
 mlp_filters: [96,48,24,12]
 avg_pool_size: [8,8,8] 
 avg_pool_padding: False
+last_encoder: False
 
 #for seghead
-feats_level: 3
+feats_level: 2
 feats_avg_kernel: 8
 in_channels: 12
 num_classes: 8
@@ -56,9 +57,9 @@ dataset_name: 'simple_dataset'
 batch_per_gpu: 256 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/l3_pool8_postopk_1000"
+data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/l2_pool8_smallestv1roi_oridfar256_10000epoch"
 mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/masks"
-valid_data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool8_postopk_1000"
+valid_data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_smallestv1roi_oridfar256_10000epoch"
 valid_mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/masks"
 
 e5_data_path_dir: "/share/home/shiqiz/data/rm009/roi_whole_brain4"
@@ -69,7 +70,7 @@ e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/valid_roi"
 num_epochs: 8000
 num_pairs: 16384 
 start_epoch: 0
-batch_size: 4096 
+batch_size: 8 
 shuffle_very_epoch: 50 
 valid_very_epoch: 50
 save_very_epoch: 50

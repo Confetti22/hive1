@@ -22,7 +22,7 @@ from distance_contrast_helper import HTMLFigureLogger
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", type=str, default='config/seghead.yaml', help="Path to YAML config")
-    parser.add_argument("--ckpt", type=str, default='/home/confetti/e5_workspace/hive1/outs/seg_head/level3_avg_pool8_fromepoch1000_focal_combo_loss/checkpoints/epoch_3650.pth', help="Checkpoint to resume from")
+    parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume from")
     parser.add_argument("--device", type=str, default="cuda")
     return parser.parse_args()
 
@@ -69,7 +69,7 @@ def main():
     cfg = load_cfg(args.cfg)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    exp_name = f"level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}_fromepoch1000_focal_combo_loss" 
+    exp_name = f"level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}_smallestv1roi_oridfar256_focal_combo_loss" 
     run_dir = Path("outs") / "seg_head" / exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)

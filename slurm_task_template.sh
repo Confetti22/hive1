@@ -11,8 +11,8 @@ sbatch --job-name="$SCRIPT_NAME" <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
-#SBATCH --partition=compute
-#SBATCH --nodelist=c003
+#SBATCH --partition=tao
+#SBATCH --nodelist=t000
 #SBATCH --gres=gpu:1
 
 # Load environment

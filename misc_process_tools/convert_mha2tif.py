@@ -1,50 +1,50 @@
-import itk
-import numpy as np
-import tifffile as tif
-# image = itk.imread("/home/confetti/data/rm009/rm009_roi/all-z64800-65104/All-Z64800-65104.mha")
-# size = itk.size(image)
-# print("Image size:", size)
+# import itk
+# import numpy as np
+# import tifffile as tif
+# # image = itk.imread("/home/confetti/data/rm009/rm009_roi/all-z64800-65104/All-Z64800-65104.mha")
+# # size = itk.size(image)
+# # print("Image size:", size)
 
-# array = itk.array_from_image(image)
-# print("Array shape:", array.shape)  # (z, y, x)
-# tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask.tiff",array)
+# # array = itk.array_from_image(image)
+# # print("Array shape:", array.shape)  # (z, y, x)
+# # tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask.tiff",array)
 
-#%%
-######## padding the roi_with 24(96um) at both z slice######
-import os
-import tifffile
-import numpy as np
+# #%%
+# ######## padding the roi_with 24(96um) at both z slice######
+# import os
+# import tifffile
+# import numpy as np
 
-# Directory containing the TIFF files
-folder = "/home/confetti/data/rm009/rm009_roi/4"
+# # Directory containing the TIFF files
+# folder = "/home/confetti/data/rm009/rm009_roi/4"
 
-# Define Z range
-z_start = 15984
-z_end = 16495
+# # Define Z range
+# z_start = 15984
+# z_end = 16495
 
-# Generate expected filenames
-filenames = [f"Z{z:05d}_C4.tif" for z in range(z_start, z_end + 1)]
+# # Generate expected filenames
+# filenames = [f"Z{z:05d}_C4.tif" for z in range(z_start, z_end + 1)]
 
-# Load and stack into a 3D array
-volume_slices = []
-for fname in filenames:
-    fpath = os.path.join(folder, fname)
-    if os.path.exists(fpath):
-        img = tifffile.imread(fpath)
-        volume_slices.append(img)
-    else:
-        raise FileNotFoundError(f"{fname} not found in directory.")
+# # Load and stack into a 3D array
+# volume_slices = []
+# for fname in filenames:
+#     fpath = os.path.join(folder, fname)
+#     if os.path.exists(fpath):
+#         img = tifffile.imread(fpath)
+#         volume_slices.append(img)
+#     else:
+#         raise FileNotFoundError(f"{fname} not found in directory.")
 
-# Stack into a 3D volume (Z, Y, X)
-volume = np.stack(volume_slices, axis=0)
-print("Volume shape:", volume.shape)  # (Z, Y, X)
-print("Volume dtype:", volume.dtype)
-tifffile.imwrite(f"/home/confetti/data/rm009/rm009_roi/z{z_start}_z{z_end}C4.tif",volume)
-#%%
-import tifffile as tif
-old_mask = tif.imread("/home/confetti/data/rm009/rm009_roi/mask_77_3500_5250.tiff")
-mask = np.pad(old_mask,((24, 23), (0, 0), (0, 0)), mode='constant', constant_values=0)
-tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask_124_3500_5250.tiff",mask)
+# # Stack into a 3D volume (Z, Y, X)
+# volume = np.stack(volume_slices, axis=0)
+# print("Volume shape:", volume.shape)  # (Z, Y, X)
+# print("Volume dtype:", volume.dtype)
+# tifffile.imwrite(f"/home/confetti/data/rm009/rm009_roi/z{z_start}_z{z_end}C4.tif",volume)
+# #%%
+# import tifffile as tif
+# old_mask = tif.imread("/home/confetti/data/rm009/rm009_roi/mask_77_3500_5250.tiff")
+# mask = np.pad(old_mask,((24, 23), (0, 0), (0, 0)), mode='constant', constant_values=0)
+# tif.imwrite("/home/confetti/data/rm009/rm009_roi/mask_124_3500_5250.tiff",mask)
 
 
 #%%
@@ -123,17 +123,20 @@ sys.path.append("/home/confetti/e5_workspace/hive1")
 from lib.datasets.simple_dataset import get_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+import numpy as np
+import tifffile as tif
 import pickle
 import os
 from config.load_config import load_cfg
 from lib.arch.ae import  load_compose_encoder_dict,build_final_model
 device ='cuda'
 args = load_cfg('config/seghead.yaml')
-args.filters = [32,64,96]
-args.mlp_filters =[96,48,24,12]
+args.filters = [32,64]
+args.mlp_filters =[64,32,24,12]
+args.last_encoder = False
 
-exp_name ='postopk_1000'
-feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l3_pool8_{exp_name}"
+exp_name ='smallestv1roi_oridfar256_10000epoch'
+feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_{exp_name}"
 os.makedirs(feats_save_dir,exist_ok=True)
 
 dataset = get_dataset(args)
@@ -152,7 +155,7 @@ cmpsd_model.eval().to(device)
 
 # the latter conv_layer parameters will not be loaded
 cnn_ckpt_pth = f'{data_prefix}/weights/rm009_3d_ae_best.pth'
-mlp_ckpt_pth =f'{data_prefix}/weights/rm009_postopk_1000.pth'
+mlp_ckpt_pth =f'{data_prefix}/weights/rm009_smallestv1roi_oridfar256_l2_pool8_10000.pth'
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
 
 from confettii.plot_helper import three_pca_as_rgb_image

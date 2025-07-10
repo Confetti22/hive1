@@ -71,4 +71,4 @@ pos_weight_ratio: 2
 d_near: 6 
 loss_enhance: True 
 re_use: False 
-exp_save_dir: "outs/contrastive_run_rm009"
+exp_save_dir: "contrastive_run_rm009"
