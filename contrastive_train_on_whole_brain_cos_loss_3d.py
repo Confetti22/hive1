@@ -15,8 +15,6 @@ python train_contrastive_template.py --cfg config/rm009.yaml \
 import argparse
 import random
 import shutil
-from pathlib import Path
-from typing import Dict, Union
 
 import numpy as np
 import torch
@@ -25,6 +23,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
+from pathlib import Path
 import zarr
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,6 +36,8 @@ from helper.contrastive_train_helper import (
     valid_from_roi,
     MLP,
     Contrastive_dataset_3d,
+    load_checkpoint,
+    save_checkpoint,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
 
@@ -50,56 +51,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume")
     p.add_argument("--device", type=str, default="cuda", help="cuda | cpu | cuda:0 …")
     return p.parse_args()
-
-
-def save_checkpoint(state: Dict, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(state, path)
-
-def load_checkpoint(
-    path: Union[str, Path],
-    model: nn.Module,
-    optimizer: optim.Optimizer | None = None,
-) -> int:
-    """
-    Load weights (and optionally optimizer state) from a checkpoint.
-
-    The checkpoint can be either …
-
-    1. A *plain* state-dict produced by ``torch.save(model.state_dict(), …)``  
-    2. A *wrapped* dict with keys like ``"model"``, ``"optim"``, and ``"epoch"``
-
-    Returns
-    -------
-    int
-        The epoch to resume from (0 if no epoch information is stored).
-    """
-    ckpt = torch.load(path, map_location="cpu")
-
-    # ───────────────────────────────────────────────────────────────── case 1 ──
-    # Raw state-dict: every value should be a tensor or a tensor-like buffer
-    if isinstance(ckpt, dict) and all(torch.is_tensor(v) or hasattr(v, "dtype")
-                                      for v in ckpt.values()):
-        model.load_state_dict(ckpt, strict=False)
-        return 0  # no epoch/optim info available
-
-    # ───────────────────────────────────────────────────────────────── case 2 ──
-    # Wrapped dict (common in custom training loops or Lightning)
-    state_dict = (
-        ckpt.get("model")           # our own training loop convention
-        or ckpt.get("state_dict")   # PyTorch-Lightning convention
-    )
-    if state_dict is None:
-        raise RuntimeError(
-            f"Checkpoint at {path} doesn’t contain a model state-dict."
-        )
-
-    model.load_state_dict(state_dict, strict=False)
-
-    if optimizer and "optim" in ckpt:
-        optimizer.load_state_dict(ckpt["optim"])
-
-    return ckpt.get("epoch", 0) + 1  # resume at *next* epoch
 
 # =============================================================================
 # Training helpers

@@ -1,4 +1,6 @@
-import itertools                      # NEW
+#%%
+import itertools                      
+from typing import Sequence, Union
 import time, zarr, math, os
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -6,40 +8,61 @@ import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-
+from scipy.ndimage import zoom
+from confettii.plot_helper import three_pca_as_rgb_image
+import tifffile as tif
 from config.load_config import load_cfg
 from helper.image_seger import ConvSegHead
+from helper.contrastive_train_helper import tsne_grid_plot, plot_pca_maps,class_balance
 from lib.arch.ae import build_final_model        # already in your script
 from distance_contrast_helper import HTMLFigureLogger
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
+from lib.core.metric import accuracy
+from collections import defaultdict
+from functools import partial
+from torchsummary import summary
+import math
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-cfg_path = 'config/seghead.yaml'
-args = load_cfg(cfg_path)
-
-args.filters = [6,12,24]
-args.mlp_filters =[24,16,12]
-# %% ---------- models ---------------------------------------------------------
-C            = 12          # channels returned by cmpsd_model
-num_classes  = 8
-cmpsd_model  = build_final_model(args).to(device)     # NEW
-seg_head     = ConvSegHead(C, num_classes).to(device)
-
-cmpsd_model.train()
-seg_head.train()
-
-optimizer = torch.optim.Adam(
-    itertools.chain(cmpsd_model.parameters(), seg_head.parameters()),
-    lr=args.lr_start
-)
-loss_fn = nn.CrossEntropyLoss()
+from collections import defaultdict
+from typing import Sequence, Tuple, Union, Literal, List
+Arr   = Union[np.ndarray, torch.Tensor]
+Array = Union[Arr, Sequence[Arr]]   # single array or list/tuple of arrays
 
 # %% ---------- validation helper ---------------------------------------------
-def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch):
+# ───────────────────────── feature hooks ──────────────────────────
+FEATURE_STORE = defaultdict(list)      # {layer_name: [Tensor, ...]}
+HOOK_HANDLES  = []                     # so we can remove them cleanly
+
+def _hook(layer_name, module, inp, out):
+    """
+    out : Tensor shape [B, C, D, H, W] or [B, C, H, W]
+    We keep it on CPU to avoid GPU memory churn.
+    """
+    FEATURE_STORE[layer_name].append(out.detach().cpu())
+
+def register_hooks(model, prefix=""):
+    """
+    Recursively register a forward hook on *leaf* modules that have weights.
+    The prefix guarantees unique names.
+    """
+    for name, m in model.named_children():
+        full_name = f"{prefix}{name}"
+        # is leaf (= no children) AND has parameters → treat as a layer of interest
+        if sum(1 for _ in m.children()) == 0 and sum(p.numel() for p in m.parameters()) > 0:
+            HOOK_HANDLES.append(m.register_forward_hook(partial(_hook, full_name)))
+        else:
+            register_hooks(m, f"{full_name}.")
+
+
+
+
+def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch,last_val_label=False):
     cmpsd_model.eval()
     seg_head.eval()
 
     valid_loss, gt_maskes, pred_maskes = [], [], []
+    total_top1 = []
+    total_top3= []
 
     with torch.no_grad():
         for inputs, labels in tqdm(valid_loader):
@@ -48,11 +71,15 @@ def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch):
             logits = seg_head(feats)              # CHANGED
 
             mask  = labels >= 0
-            loss  = loss_fn(
-                logits.permute(0, 2, 3, 4, 1)[mask],   # [N_vox,K]
-                labels[mask]
-            )
+
+            logits_flat  = logits.permute(0, 2, 3, 4, 1)[mask]   # [N_vox, K]
+            labels_flat  = labels[mask]
+            loss         = loss_fn(logits_flat, labels_flat)
             valid_loss.append(loss.item())
+
+            top1, top3 = accuracy(logits_flat, labels_flat, topk=(1, 3))
+            total_top1.append(top1)
+            total_top3.append(top3)
 
             probs = F.softmax(logits, dim=1)
             pred  = torch.argmax(probs, dim=1) + 1
@@ -100,7 +127,101 @@ def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch):
     cmpsd_model.train()
     seg_head.train()
 
-    return sum(valid_loss) / len(valid_loss)
+    avg_valid_loss = sum(valid_loss)/len(valid_loss)
+    avg_top1 = sum(total_top1)/len(total_top1)
+    avg_top3 = sum(total_top3)/len(total_top3)
+
+    return avg_valid_loss, avg_top1,avg_top3
+
+def log_tsne(writer, epoch, label_volume, max_layers=12):
+    """
+    Takes the global FEATURE_STORE, runs t-SNE per layer
+    on the first validation batch, plots, then clears the store.
+    """
+    pca_img_lst               = []
+    tsne_encoded_feats_lst    = []
+    tsne_label_lst            = []
+    plot_tag_lst = []
+
+    for k in FEATURE_STORE.keys()[:max_layers]:
+        feat = FEATURE_STORE[k][-1]          # last batch only
+        feat = feat.detach().cpu().squeeze().numpy()
+            
+        feat = np.moveaxis(feat,0,-1)            # [D, H, W,C]
+        lbl  = label_volume          # [D, H, W]
+        feat2d = feat[int(feat.shape[0]//2 ),:]           # [H, W, C]
+        lbl2d  = lbl[int(lbl.shape[0]//2),:]               # [H, W]
+        H,W,C = feat2d.shape
+
+        rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1,C), (H, W))
+        pca_img_lst.append(rgb_img)
+
+        zoom_factor = [y / x for y, x in zip((H, W), lbl2d.shape)]
+        label_zoomed = zoom(lbl2d, zoom_factor, order=0)
+        mask = label_zoomed >= 0
+        fg_feats_flat = feat2d[mask]
+        fg_label_flat = label_zoomed[mask]
+        blced_fg_feats_flat,blced_fg_label_flat = class_balance(fg_feats_flat,fg_label_flat)
+        tsne_encoded_feats_lst.append(blced_fg_feats_flat)
+        tsne_label_lst.append(blced_fg_label_flat)
+        plot_tag_lst.append(k)
+
+        # --------------- plot -----------------
+    tsne_grid_plot(tsne_encoded_feats_lst,tsne_label_lst,writer,tag_list=plot_tag_lst,step=epoch)
+    plot_pca_maps(pca_img_lst,writer=writer,tag=f"pca/{k}",step=epoch,ncols=len(pca_img_lst))
+
+
+    FEATURE_STORE.clear()   # free memory
+
+#%%
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+cfg_path = 'config/seghead.yaml'
+args = load_cfg(cfg_path)
+
+args.filters = [6,12,24]
+args.mlp_filters =[24,16,12]
+args.data_path_dir = "/home/confetti/data/rm009/v1_roi1_seg/rois"
+args.valid_data_path_dir = "/home/confetti/data/rm009/v1_roi1_seg_valid/rois"
+args.feats_level = 3
+args.feats_avg_kernel = 8
+
+C            = 12          # channels returned by cmpsd_model
+num_classes  = 8
+cmpsd_model  = build_final_model(args).to(device)     # NEW
+seg_head     = ConvSegHead(C, num_classes).to(device)
+
+cmpsd_model.train()
+seg_head.train()
+
+summary(cmpsd_model,(1,*args.input_size))
+summary(seg_head,(12,64,64,64))
+print(f"{cmpsd_model= }")
+print(f"{seg_head= }")
+
+
+#register for later feature_extraction
+register_hooks(cmpsd_model.cnn_encoder, "cnn.")
+register_hooks(cmpsd_model.mlp_encoder, "mlp.")
+register_hooks(seg_head,              "head.")
+
+args.lr_start = 1e-3
+args.lr_end = 1e-5
+warmup_epochs = 10
+max_epochs = args.num_epochs
+
+optimizer = torch.optim.Adam(
+    itertools.chain(cmpsd_model.parameters(), seg_head.parameters()),
+    lr=args.lr_start
+)
+from lib.core.scheduler import WarmupCosineLR
+
+scheduler = WarmupCosineLR(optimizer,
+                           warmup_epochs=warmup_epochs,
+                           max_epochs=max_epochs)
+
+
+loss_fn = nn.CrossEntropyLoss()
+
 
 # %% ---------- data loaders & loggers (unchanged) -----------------------------
 
@@ -109,9 +230,13 @@ loader         = DataLoader(dataset, batch_size=4, shuffle=True, drop_last=False
 valid_dataset  = get_valid_dataset(args)
 valid_loader   = DataLoader(valid_dataset, batch_size=1, shuffle=False, drop_last=False)
 
+valid_label_volume = tif.imread("/home/confetti/data/rm009/v1_roi1_seg_valid/masks/0010_mask.tiff")
+valid_label_volume = valid_label_volume.astype(np.int8)
+valid_label_volume = valid_label_volume -1 # class number rearrange from 0 to N-1
+
 exp_save_dir   = 'outs/seg_head'
 # exp_name       = f"test8_level{args.feats_level}_avg_pool{args.feats_avg_kernel}"
-exp_name       = f"training_from_scratch_level{args.feats_level}_avg_pool{args.feats_avg_kernel}"
+exp_name       = f"temp_training_from_scratch_level{args.feats_level}_avg_pool{args.feats_avg_kernel}_3"
 model_save_dir = f"{exp_save_dir}/{exp_name}"
 os.makedirs(model_save_dir, exist_ok=True)
 
@@ -122,27 +247,47 @@ train_img_logger= HTMLFigureLogger(exp_save_dir + '/' + exp_name, html_name="tra
 # %% ---------- training loop --------------------------------------------------
 for epoch in tqdm(range(args.num_epochs)):
     train_loss = []
-    for inputs, labels in loader:
-        inputs, labels = inputs.to(device), labels.to(device)
-        mask = labels >= 0
+    total_top1 = []
+    total_top3= []
+    for inputs, label in loader:
+        inputs, label = inputs.to(device), label.to(device)
+        mask = label >= 0
 
         optimizer.zero_grad()
         feats  = cmpsd_model(inputs)          # NEW
         logits = seg_head(feats)              # CHANGED
+        logits_flat = logits.permute(0, 2, 3, 4, 1)[mask]
+        labels_flat = label[mask]
 
-        loss = loss_fn(logits.permute(0,2,3,4,1)[mask], labels[mask])
+        loss = loss_fn(logits_flat,labels_flat)
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         train_loss.append(loss.item())
 
-    avg_loss = sum(train_loss) / len(train_loss)
-    writer.add_scalar('Loss/train', avg_loss, epoch)
-    print(f"[Epoch {epoch}] train loss: {avg_loss:.4f}")
+        top1, top3 = accuracy(logits_flat, labels_flat, topk=(1, 3))
+        total_top1.append(top1)
+        total_top3.append(top3)
 
+        FEATURE_STORE.clear()   # free memory
+
+    avg_loss = sum(train_loss) / len(train_loss)
+    avg_top1 = sum(total_top1)/len(total_top1)
+    avg_top3 = sum(total_top3)/len(total_top3)
+    current_lr = scheduler.get_last_lr()[0]
+    writer.add_scalar('lr',scheduler.get_last_lr()[0] , epoch)
+    writer.add_scalar('Loss/train', avg_loss, epoch)
+    writer.add_scalar("top1_acc/train", avg_top1, epoch)
+    writer.add_scalar("top3_acc/train", avg_top3, epoch)
+    print(f"Epoch {epoch:02d} | loss={loss:.4f} | lr={current_lr:.6f}")
+    
     if epoch % args.valid_very_epoch == 0:
-        v_loss = seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch)
+        v_loss,avg_top1,avg_top3= seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch)
         writer.add_scalar('Loss/valid', v_loss, epoch)
+        writer.add_scalar("top1_acc/valid", avg_top1, epoch)
+        writer.add_scalar("top3_acc/valid", avg_top3, epoch)
+        log_tsne(writer, epoch, valid_label_volume) #log_tsne will use the last feature collected by FEATURE_STORE dict
 
     if (epoch % (4 * args.valid_very_epoch)) == 0:
         seg_valid(train_img_logger, loader, cmpsd_model, seg_head, epoch)

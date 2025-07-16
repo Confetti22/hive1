@@ -2,9 +2,12 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.utils.data import Dataset
+import torch.optim as optim
 from sklearn.manifold import TSNE
 from scipy.ndimage import zoom
 import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, Union
 
 import random
 import pickle
@@ -13,6 +16,68 @@ import tifffile as tif
 from helper.image_reader import Ims_Image
 from confettii.plot_helper import three_pca_as_rgb_image
 
+
+
+def save_checkpoint(state: Dict, path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(state, path)
+
+from pathlib import Path
+from typing import Union
+import torch
+from torch import nn, optim
+
+
+def load_checkpoint(
+    path: Union[str, Path],
+    model: nn.Module,
+    optimizer: optim.Optimizer | None = None,
+) -> int:
+    """
+    Load weights (and optionally optimizer state) from a checkpoint.
+    Handles both raw state_dict and wrapped dict with epoch/optimizer.
+
+    Automatically reshapes 2D Linear weights to 5D 1x1 Conv weights if needed.
+
+    Returns
+    -------
+    int
+        The epoch to resume from (0 if no epoch information is stored).
+    """
+    ckpt = torch.load(path, map_location="cpu")
+
+    # ───────────────────────────────────── case 1: raw state_dict ──
+    if isinstance(ckpt, dict) and all(torch.is_tensor(v) or hasattr(v, "dtype")
+                                      for v in ckpt.values()):
+        ckpt = {"model": ckpt}
+
+    # ──────────────────────────────── case 2: wrapped dict (Lightning, custom)
+    state_dict = ckpt.get("model") or ckpt.get("state_dict")
+    if state_dict is None:
+        raise RuntimeError(f"Checkpoint at {path} doesn’t contain a model state-dict.")
+
+    # Adapt shape mismatches (e.g., [out, in] → [out, in, 1, 1, 1])
+    adapted_dict = {}
+    model_state = model.state_dict()
+    for k, v in state_dict.items():
+        if k in model_state:
+            expected_shape = model_state[k].shape
+            if v.shape != expected_shape:
+                if v.ndim == 2 and len(expected_shape) == 5 and expected_shape[2:] == (1, 1, 1):
+                    v = v.view(*expected_shape)  # expand to Conv3D weight shape
+                elif v.ndim == 1 and len(expected_shape) == 1:
+                    pass  # biases usually match
+                else:
+                    print(f"[warn] Skipping {k}: shape {v.shape} → {expected_shape} mismatch")
+                    continue
+        adapted_dict[k] = v
+
+    model.load_state_dict(adapted_dict, strict=False)
+
+    if optimizer and "optim" in ckpt:
+        optimizer.load_state_dict(ckpt["optim"])
+
+    return ckpt.get("epoch", 0) + 1
 
 class Contrastive_dataset_3d_one_stage(Dataset):
     """
@@ -427,23 +492,124 @@ def plot_ncc_maps(img_lst,loc_idx_lst,locations,writer, tag="ncc_plot", step=0,n
     writer.add_figure(tag, fig, global_step=step)
     plt.close(fig)
 
-def plot_pca_maps(img_lst,writer, tag="pca_plot", step=0,ncols=4,fig_size=4):
+# plot_pca_maps then also works when len(img_lst)==1
+def plot_pca_maps(
+    img_lst,
+    writer,
+    tag: str = "pca_plot",
+    step: int = 0,
+    ncols: int = 4,
+    fig_size: int = 4,
+):
     num_plots = len(img_lst)
-    ncols = ncols
-    nrows = int(np.ceil(num_plots/ ncols))
+    nrows = int(np.ceil(num_plots / ncols))
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_size*ncols,  fig_size*nrows))
+    # Create the grid of sub-plots
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_size * ncols, fig_size * nrows))
 
-    for i, ax in enumerate(axes.flat):
+    # Make sure `axes` is always a 1-D iterable
+    axes = np.atleast_1d(axes).ravel()
+
+    # Fill the axes with images (or leave them blank)
+    for i, ax in enumerate(axes):
         if i < num_plots:
             ax.imshow(img_lst[i])
-        ax.axis('off')
-    plt.tight_layout()
-    # Save plot to TensorBoard
+        ax.axis("off")
 
+    plt.tight_layout()
+
+    # Log to TensorBoard
     writer.add_figure(tag, fig, global_step=step)
     plt.close(fig)
 
+
+from collections import defaultdict
+from typing import Sequence, Tuple, Union, Literal, List
+Arr   = Union[np.ndarray, torch.Tensor]
+Array = Union[Arr, Sequence[Arr]]   # single array or list/tuple of arrays
+
+def class_balance(
+    feats_lst : Array,
+    label_lst : Array,
+    n_per_class: Union[int, Literal["min", "max"]] = "min",
+    shuffle   : bool  = True,
+    random_state: int | None = None
+) -> Tuple[List[Arr], List[Arr]]:
+    """
+    Return class-balanced versions of feats_lst & label_lst.
+
+    Parameters
+    ----------
+    feats_lst, label_lst
+        • Either 1-D sequences (length = N) **or**
+        • 2-D/ND arrays with first-axis length = N.
+    n_per_class : int | "min" | "max"
+        • "min" → use size of the smallest class  (down-sample, default)  
+        • "max" → use size of the largest class   (up-sample w/ replacement)  
+        • int   → explicit quota (down- or up-sampling as needed).
+    shuffle : bool
+        Shuffle the final order.
+    random_state : int | None
+        Seed for reproducibility.
+
+    Returns
+    -------
+    feats_balanced, labels_balanced : **lists** with equal counts per class.
+    """
+    rng = np.random.default_rng(random_state)
+
+    # ------- convert to python lists of arrays for uniform handling ----------
+    feats_is_array  = isinstance(feats_lst, (np.ndarray, torch.Tensor))
+    labels_is_array = isinstance(label_lst, (np.ndarray, torch.Tensor))
+
+    feats_seq  = [feats_lst]  if feats_is_array  else list(feats_lst)
+    labels_seq = [label_lst]  if labels_is_array else list(label_lst)
+
+    N = len(labels_seq[0])                  # sample count
+    for arr in labels_seq + feats_seq:
+        assert len(arr) == N, "length mismatch among inputs"
+
+    # -------------------  gather indices per class ---------------------------
+    class_to_idx = defaultdict(list)
+    labels_np    = labels_seq[0] if isinstance(labels_seq[0], np.ndarray) \
+                   else np.array(labels_seq[0])
+    for idx, y in enumerate(labels_np):
+        class_to_idx[int(y)].append(idx)
+
+    counts = {c: len(idxs) for c, idxs in class_to_idx.items()}
+    if isinstance(n_per_class, int):
+        quota = n_per_class
+    elif n_per_class == "max":
+        quota = max(counts.values())
+    else:  # "min"
+        quota = min(counts.values())
+
+    # -------------------- sample (with replacement if needed) ----------------
+    chosen_idx = []
+    for c, idxs in class_to_idx.items():
+        if len(idxs) >= quota:
+            chosen = rng.choice(idxs, quota, replace=False)
+        else:   # minority class, need to up-sample
+            chosen = rng.choice(idxs, quota, replace=True)
+        chosen_idx.extend(chosen)
+
+    if shuffle:
+        rng.shuffle(chosen_idx)
+
+    # -------------------- slice / gather back --------------------------------
+    def _gather(seq):
+        if len(seq) == 1:    # originally a single array → return array
+            arr = seq[0]
+            if isinstance(arr, torch.Tensor):
+                return arr[chosen_idx]
+            return arr[chosen_idx, ...]
+        else:                # list/tuple input → return list/tuple
+            return [a[chosen_idx] for a in seq]
+
+    balanced_feats  = _gather(feats_seq)
+    balanced_labels = _gather(labels_seq)
+
+    return balanced_feats, balanced_labels
 
 
 
@@ -461,17 +627,70 @@ def tsne_plot(encoded, labels, ax, title='tsne'):
     ax.legend(*scatter.legend_elements(), title="Digits")
     ax.set_title(title)
 
-def tsne_grid_plot(encoded_list, labels_list, writer, tag='tsne_grid', step=0):
+def tsne_grid_plot(
+    encoded_list,
+    labels_list,
+    writer,
+    tag: str = "tsne_grid",
+    step: int = 0,
+    tag_list=None,
+):
+    """
+    Plot one or more t-SNE scatter plots side-by-side and log the composite figure
+    to TensorBoard.
+
+    Parameters
+    ----------
+    encoded_list : list[array-like]
+        List of feature arrays to embed/plot; length = N plots.
+    labels_list : list[array-like]
+        Parallel list of integer / categorical labels for coloring points.
+    writer : SummaryWriter
+        TensorBoard writer handle.
+    tag : str, default="tsne_grid"
+        TensorBoard *grid* tag used for the combined figure logged via add_figure().
+    step : int, default=0
+        Global step for TensorBoard.
+    tag_list : list[str] or None
+        Optional per-plot titles. Length must be == N *or* 1.
+        If length==1 and N>1, an index suffix "_i" is appended automatically.
+        If None, defaults to [f"{tag}_{i}" for i in range(N)].
+    """
+    import matplotlib.pyplot as plt  # local import to avoid polluting global namespace
+
     num_plots = len(encoded_list)
+    if num_plots != len(labels_list):
+        raise ValueError(f"encoded_list ({num_plots}) and labels_list ({len(labels_list)}) length mismatch.")
+
+    # Normalize tag_list
+    if tag_list is None:
+        per_plot_tags = [f"{tag}_{i}" for i in range(num_plots)]
+    else:
+        if len(tag_list) == 1 and num_plots > 1:
+            base = tag_list[0]
+            per_plot_tags = [f"{base}_{i}" for i in range(num_plots)]
+        elif len(tag_list) == num_plots:
+            per_plot_tags = list(tag_list)
+        else:
+            raise ValueError(
+                f"tag_list length ({len(tag_list)}) must be 1 or match num_plots ({num_plots})."
+            )
+
+    # Create figure/axes
     fig, axes = plt.subplots(1, num_plots, figsize=(8 * num_plots, 6))
-    
     if num_plots == 1:
-        axes = [axes]  # Ensure axes is iterable for a single plot
-    
-    for i, (encoded, labels) in enumerate(zip(encoded_list, labels_list)):
-        tsne_plot(encoded, labels, axes[i], title=f'{tag}_{i}')
-    
+        axes = [axes]  # make iterable
+
+    # Draw each subplot
+    for ax, encoded, labels, title_str in zip(axes, encoded_list, labels_list, per_plot_tags):
+        tsne_plot(encoded, labels, ax, title=title_str)
+
+    plt.tight_layout()
+
+    # Log the *grid* figure under the supplied 'tag'
     writer.add_figure(tag, fig, global_step=step)
+
+    # Close to free memory (TensorBoard now owns the rendered image)
     plt.close(fig)
 
 def get_vsi_eval_data(img_no_list =[1,3,4,5]):
@@ -533,7 +752,7 @@ def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = True):
     return eval_datas
 
 
-def get_rm009_eval_data(E5,):
+def get_rm009_eval_data(E5,img_no_list=[1,2]):
     eval_datas = []
     # === eval feats and ncc_points and labels ===#
     # Set the path prefix based on E5 flag
@@ -543,7 +762,7 @@ def get_rm009_eval_data(E5,):
         prefix = "/home/confetti/data"
 
     # === eval feats and ncc_points and labels ===#
-    for img_no in [1,2]:
+    for img_no in img_no_list:
         vol = tif.imread(f"{prefix}/rm009/seg_valid/{img_no:04d}.tif")
         mask = tif.imread(f"{prefix}/rm009/seg_valid/{img_no:04d}_human_mask.tif")
         
@@ -611,7 +830,7 @@ def valid_from_roi(model, it, eval_data, writer):
         tsne_label_lst.append(label_rs.ravel())
 
     # ---------- logging ----------
-    # tsne_grid_plot(tsne_encoded_feats_lst,tsne_label_lst,writer,tag='tsne',step=1)
+    tsne_grid_plot(tsne_encoded_feats_lst,tsne_label_lst,writer,tag='tsne',step=1)
     plot_pca_maps(pca_img_lst,writer=writer,tag='pca',step=it,ncols=len(pca_img_lst))
 
     if len(idxes) > 0: 

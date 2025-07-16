@@ -24,7 +24,7 @@ class SegDataset(Dataset):
         self.data_path = args.e5_data_path_dir if self.e5 else args.data_path_dir
         self.mask_path = args.e5_mask_path_dir if self.e5 else args.mask_path_dir
         self.valid_data_path = args.e5_valid_data_path_dir if self.e5 else args.valid_data_path_dir
-        self.valid_mask_path = args.e5_valid_data_path_dir if self.e5 else args.valid_mask_path_dir
+        self.valid_mask_path = args.e5_valid_mask_path_dir if self.e5 else args.valid_mask_path_dir
         self.valid = valid
         self.feats_level = args.feats_level
         self.feats_avg_kernel = args.feats_avg_kernel

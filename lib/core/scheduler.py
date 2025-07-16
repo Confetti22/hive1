@@ -1,24 +1,36 @@
-import numpy as np
+from torch.optim.lr_scheduler import _LRScheduler
 
-# copy-paste from https://github.com/facebookresearch/dino/blob/main/utils.py
-def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
-    warmup_schedule = np.array([])
-    warmup_iters = warmup_epochs * niter_per_ep
-    if warmup_epochs > 0:
-            warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+import math
+class WarmupCosineLR(_LRScheduler):
+    """
+    Linearly warm-up the learning-rate for `warmup_epochs`,
+    then cosine-anneal it to zero over the remaining epochs.
 
-    iters = np.arange(epochs * niter_per_ep - warmup_iters)
-    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+    Args
+    ----
+    optimizer : torch.optim.Optimizer
+    warmup_epochs : int
+        Number of warm-up epochs (≥1).
+    max_epochs : int
+        Total number of training epochs.
+    last_epoch : int, default -1
+        Start epoch.  Leave at -1 unless you are resuming training.
+    """
 
-    schedule = np.concatenate((warmup_schedule, schedule))
-    assert len(schedule) == epochs * niter_per_ep
-    return schedule
+    def __init__(self, optimizer, warmup_epochs: int, max_epochs: int, last_epoch: int = -1):
+        self.warmup_epochs = warmup_epochs
+        self.max_epochs = max_epochs
+        super().__init__(optimizer, last_epoch)
 
-def warmup_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=10):
+    def get_lr(self):
+        # `self.last_epoch` is the *next* epoch index PyTorch will enter (0-based)
+        epoch = self.last_epoch + 1
+        if epoch <= self.warmup_epochs:                       # linear warm-up
+            warmup_factor = epoch / float(self.warmup_epochs)
+            return [base_lr * warmup_factor for base_lr in self.base_lrs]
 
-    warmup_schedule = np.linspace(base_value, final_value, warmup_epochs * niter_per_ep)
-    schedule = np.ones((epochs - warmup_epochs) * niter_per_ep) * final_value
+        # cosine decay (epoch > warm-up)
+        progress = (epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
+        cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
+        return [base_lr * cosine_factor for base_lr in self.base_lrs]
 
-    schedule = np.concatenate((warmup_schedule, schedule))
-    assert len(schedule) == epochs * niter_per_ep
-    return schedule

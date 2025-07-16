@@ -1,20 +1,17 @@
 # train_seghead_main.py
 import argparse
-import os
 from pathlib import Path
 import shutil
-from datetime import datetime
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
 from config.load_config import load_cfg
-from helper.image_seger import ConvSegHead
-from train_seghead_helper import ComboLoss, compute_class_weights_from_dataset, seg_valid
+from lib.arch.seg import ConvSegHead
+from train_seghead_helper import ComboLoss,accuracy,compute_class_weights_from_dataset, seg_valid
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
 from distance_contrast_helper import HTMLFigureLogger
 
@@ -43,6 +40,8 @@ def load_checkpoint(path, model, optimizer=None):
 def train_one_epoch(model, loader, criterion, optimizer, device, epoch, writer):
     model.train()
     train_loss = []
+    total_top1 = []
+    total_top3= []
 
     for input, label in tqdm(loader, desc=f"Train Epoch {epoch}", leave=False):
         input, label = input.to(device), label.to(device)
@@ -59,8 +58,17 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, writer):
 
         train_loss.append(loss.item())
 
+        top1, top3 = accuracy(logits_flat, labels_flat, topk=(1, 3))
+        total_top1.append(top1.item())
+        total_top3.append(top3.item())
+        
+
     avg_loss = sum(train_loss) / len(train_loss)
+    avg_top1 = sum(total_top1)/len(total_top1)
+    avg_top3 = sum(total_top3)/len(total_top3)
     writer.add_scalar("Loss/train", avg_loss, epoch)
+    writer.add_scalar("top1_acc/train", avg_top1, epoch)
+    writer.add_scalar("top3_acc/train", avg_top3, epoch)
     return avg_loss
 
 
@@ -69,7 +77,7 @@ def main():
     cfg = load_cfg(args.cfg)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    exp_name = f"level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}_smallestv1roi_oridfar256_focal_combo_loss" 
+    exp_name = f"level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}_smallestv1roi_postopk_nview6_focal_combo_loss" 
     run_dir = Path("outs") / "seg_head" / exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -101,8 +109,10 @@ def main():
         print(f"[Epoch {epoch}] Train Loss: {avg_loss:.4f}")
 
         if epoch % cfg.valid_very_epoch == 0:
-            val_loss = seg_valid(img_logger, valid_loader, model, epoch, device=device, loss_fn=loss_fn)
+            val_loss ,avg_top1, avg_top3 = seg_valid(img_logger, valid_loader, model, epoch, device=device, loss_fn=loss_fn)
             writer.add_scalar("Loss/valid", val_loss, epoch)
+            writer.add_scalar("top1_acc/valid", avg_top1, epoch)
+            writer.add_scalar("top3_acc/valid", avg_top3, epoch)
 
         if epoch % (4 * cfg.valid_very_epoch) == 0:
             seg_valid(train_img_logger, loader, model, epoch, device=device, loss_fn=loss_fn)
