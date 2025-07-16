@@ -693,6 +693,176 @@ def tsne_grid_plot(
     # Close to free memory (TensorBoard now owns the rendered image)
     plt.close(fig)
 
+def _scatter_embedding(ax, emb, labels, title, filter_label=0, cmap='tab10'):
+    """
+    Generic scatter: emb [N,2], labels [N].
+    Filters out points whose label == filter_label (if not None).
+    """
+    import numpy as np
+    labels = np.asarray(labels)
+    if filter_label is not None:
+        mask = labels != filter_label
+        emb = emb[mask]
+        labels = labels[mask]
+
+    sc = ax.scatter(emb[:, 0], emb[:, 1], s=1.2, c=labels, cmap=cmap)
+    # legend_elements() can be heavy for large class counts; optional:
+    try:
+        ax.legend(*sc.legend_elements(), title="Label", loc="best", markerscale=4)
+    except Exception:
+        pass
+    ax.set_title(title)
+    from sklearn.manifold import TSNE
+
+def _run_tsne(X, tsne_kwargs=None):
+    if tsne_kwargs is None:
+        tsne_kwargs = {}
+    # defaults
+    tsne_defaults = dict(n_components=2, perplexity=20, random_state=42, init='pca')
+    tsne_defaults.update(tsne_kwargs)
+    return TSNE(**tsne_defaults).fit_transform(X)
+
+
+def _run_umap(X, umap_kwargs=None):
+    try:
+        import umap
+    except ImportError as e:
+        raise RuntimeError(
+            "UMAP is not installed. `pip install umap-learn` to enable mode='umap' or 'both'."
+        ) from e
+
+    if umap_kwargs is None:
+        umap_kwargs = {}
+    umap_defaults = dict(n_components=2, n_neighbors=30, min_dist=0.1, random_state=42)
+    umap_defaults.update(umap_kwargs)
+    reducer = umap.UMAP(**umap_defaults)
+    return reducer.fit_transform(X)
+
+
+import warnings
+warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
+
+def umap_tsne_grid_plot(
+    encoded_list,
+    labels_list,
+    writer,
+    tag: str = "embed_grid",
+    step: int = 0,
+    tag_list=None,
+    mode: str = "tsne",
+    tsne_kwargs=None,
+    umap_kwargs=None,
+    filter_label=0,
+):
+    """
+    Plot one or more embeddings (t-SNE and/or UMAP) side-by-side (and stacked if both)
+    and log to TensorBoard.
+
+    Parameters
+    ----------
+    encoded_list : list[array-like, shape (Ni, Di)]
+    labels_list  : list[array-like, shape (Ni,)]
+    writer       : SummaryWriter
+    tag          : str   TensorBoard root tag for the *composite* figure
+    step         : int   Global step
+    tag_list     : list[str] or None
+        Same semantics as before (len==1 auto-expanded; len==N must match N).
+    mode         : {'tsne','umap','both','tsne+umap','umap+tsne'}
+        Controls what to plot. 'both' → 2-row figure (row0 t-SNE, row1 UMAP).
+    tsne_kwargs  : dict passed to sklearn.manifold.TSNE
+    umap_kwargs  : dict passed to umap.UMAP
+    filter_label : value to exclude (e.g., background 0); set to None to keep all.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    num_plots = len(encoded_list)
+    if num_plots != len(labels_list):
+        raise ValueError(
+            f"encoded_list ({num_plots}) and labels_list ({len(labels_list)}) length mismatch."
+        )
+
+    # Normalize titles
+    if tag_list is None:
+        per_plot_tags = [f"{tag}_{i}" for i in range(num_plots)]
+    else:
+        if len(tag_list) == 1 and num_plots > 1:
+            base = tag_list[0]
+            per_plot_tags = [f"{base}_{i}" for i in range(num_plots)]
+        elif len(tag_list) == num_plots:
+            per_plot_tags = list(tag_list)
+        else:
+            raise ValueError(
+                f"tag_list length ({len(tag_list)}) must be 1 or match num_plots ({num_plots})."
+            )
+
+    mode_norm = mode.lower()
+    if mode_norm in ("tsne+umap", "umap+tsne"):
+        mode_norm = "both"
+    if mode_norm not in ("tsne", "umap", "both"):
+        raise ValueError(f"Unknown mode='{mode}'. Expected 'tsne','umap','both'.")
+
+    # Run reducers -------------------------------------------------------------
+    tsne_embeds = None
+    umap_embeds = None
+
+    if mode_norm in ("tsne", "both"):
+        tsne_embeds = []
+        for X in encoded_list:
+            tsne_embeds.append(_run_tsne(X, tsne_kwargs))
+
+    if mode_norm in ("umap", "both"):
+        umap_embeds = []
+        for X in encoded_list:
+            umap_embeds.append(_run_umap(X, umap_kwargs))
+
+    # Figure layout ------------------------------------------------------------
+    if mode_norm == "both":
+        nrows = 2
+        ncols = num_plots
+        fig, axes = plt.subplots(nrows, ncols, figsize=(8 * ncols, 6 * nrows))
+        # Ensure we can iterate uniformly
+        axes_tsne = axes[0, :] if ncols > 1 else [axes[0, 0]]
+        axes_umap = axes[1, :] if ncols > 1 else [axes[1, 0]]
+
+        # Row 0: t-SNE
+        for ax, emb, labels, base_title in zip(axes_tsne, tsne_embeds, labels_list, per_plot_tags):
+            _scatter_embedding(ax, emb, labels, f"{base_title} (t-SNE)", filter_label)
+
+        # Row 1: UMAP
+        for ax, emb, labels, base_title in zip(axes_umap, umap_embeds, labels_list, per_plot_tags):
+            _scatter_embedding(ax, emb, labels, f"{base_title} (UMAP)", filter_label)
+
+    else:
+        # single-row figure
+        nrows = 1
+        ncols = num_plots
+        fig, axes = plt.subplots(nrows, ncols, figsize=(8 * ncols, 6))
+        if num_plots == 1:
+            axes = [axes]  # flatten
+        # Choose which embeddings we have
+        embeds = tsne_embeds if mode_norm == "tsne" else umap_embeds
+        suffix = "(t-SNE)" if mode_norm == "tsne" else "(UMAP)"
+        for ax, emb, labels, base_title in zip(axes, embeds, labels_list, per_plot_tags):
+            _scatter_embedding(ax, emb, labels, f"{base_title} {suffix}", filter_label)
+
+    plt.tight_layout()
+    writer.add_figure(tag, fig, global_step=step)
+    plt.close(fig)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def get_vsi_eval_data(img_no_list =[1,3,4,5]):
     eval_feats_path = '/home/confetti/data/wide_filed/test_hp_raw_feats.pkl'
     eval_label_path = '/home/confetti/data/wide_filed/test_hp_label.tif'

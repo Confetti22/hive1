@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/training_seg_head.py"
+SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/misc_process_tools/extract_feats_volume.py"
 SCRIPT_NAME=$(basename "$SCRIPT_PATH" .py)
 
 sbatch --job-name="$SCRIPT_NAME" <<EOF
@@ -10,9 +10,9 @@ sbatch --job-name="$SCRIPT_NAME" <<EOF
 #SBATCH --time=96:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=24G
-#SBATCH --partition=tao
-#SBATCH --nodelist=t001
+#SBATCH --mem=32G
+#SBATCH --partition=compute
+#SBATCH --nodelist=c001
 #SBATCH --gres=gpu:1
 
 # Load environment

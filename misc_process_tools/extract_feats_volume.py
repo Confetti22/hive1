@@ -75,8 +75,8 @@ class VolumeReader:
     @property
     def shape(self) -> Tuple[int, int, int]:
         """Return full volume shape (D, H, W)."""
-        if hasattr(self._handle, "shape"):
-            return tuple(int(x) for x in self._handle.shape)
+        if hasattr(self._handle, "rois"):
+            return tuple(int(x) for x in self._handle.rois[0][3:])
         return self._handle.data.shape  # tifffile memmap
 
     # ------------------------------------------------------------- random block
@@ -250,14 +250,26 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("../config/rm009.yaml")
+cfg = load_cfg("config/rm009.yaml")
 avg_pool = None
 cfg.avg_pool_size = [avg_pool] * 3
+cfg.filters = [32,64]
+cfg.kernel_size = [5,5]
+
+E5= True
+if E5:
+    data_prefix = "/share/home/shiqiz/data"
+    workspace_prefix = "/share/home/shiqiz/workspace/hive1"
+else:
+    data_prefix = "/home/confetti/data"
+    workspace_prefix = '/home/confetti/e5_workspace/hive1'
+
 
 model = build_encoder_model(cfg, dims=3)
-load_encoder2encoder(model, "/home/confetti/data/weights/rm009_3d_ae_best.pth")
-vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
-save_zarr_path = "/home/confetti/data/rm009/feats_l2_avg8_z16176_z16299C4.zarr"
+load_encoder2encoder(model, f"{data_prefix}/weights/rm009_3d_ae_best.pth")
+# vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
+vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
+save_zarr_path = f"{data_prefix}/rm009/feats_l2_avg8_z13750_z17499C4.zarr"
 #%%
 
 extract_features_to_zarr(
@@ -267,7 +279,7 @@ extract_features_to_zarr(
     region_size=(64, 1024, 1024),
     roi_size=(32,32,32),
     roi_stride=(8,8,8),
-    batch_size=2048,
+    batch_size=8192,
     device="cuda",
     layer_path="down_layers.0",  # pick *one* internal layer
     pool_size=8,                 # or None / 1 for “no pooling”

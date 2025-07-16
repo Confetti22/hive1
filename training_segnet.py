@@ -1,6 +1,7 @@
 #%%
 import itertools                      
 from typing import Sequence, Union
+from pathlib import Path
 import time, zarr, math, os
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -13,7 +14,7 @@ from confettii.plot_helper import three_pca_as_rgb_image
 import tifffile as tif
 from config.load_config import load_cfg
 from helper.image_seger import ConvSegHead
-from helper.contrastive_train_helper import tsne_grid_plot, plot_pca_maps,class_balance
+from helper.contrastive_train_helper import tsne_grid_plot,umap_tsne_grid_plot, plot_pca_maps,class_balance
 from lib.arch.ae import build_final_model        # already in your script
 from distance_contrast_helper import HTMLFigureLogger
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
@@ -32,6 +33,7 @@ Array = Union[Arr, Sequence[Arr]]   # single array or list/tuple of arrays
 # ───────────────────────── feature hooks ──────────────────────────
 FEATURE_STORE = defaultdict(list)      # {layer_name: [Tensor, ...]}
 HOOK_HANDLES  = []                     # so we can remove them cleanly
+LAYER_ORDER   = []
 
 def _hook(layer_name, module, inp, out):
     """
@@ -49,10 +51,10 @@ def register_hooks(model, prefix=""):
         full_name = f"{prefix}{name}"
         # is leaf (= no children) AND has parameters → treat as a layer of interest
         if sum(1 for _ in m.children()) == 0 and sum(p.numel() for p in m.parameters()) > 0:
+            LAYER_ORDER.append(full_name)  # <-- capture order
             HOOK_HANDLES.append(m.register_forward_hook(partial(_hook, full_name)))
         else:
             register_hooks(m, f"{full_name}.")
-
 
 
 
@@ -133,45 +135,108 @@ def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch,last_val_la
 
     return avg_valid_loss, avg_top1,avg_top3
 
-def log_tsne(writer, epoch, label_volume, max_layers=12):
+def log_layer_embeddings(
+    writer,
+    epoch,
+    label_volume,
+    layer_order,
+    max_layers=12,
+    mode="tsne",
+    tsne_kwargs=None,
+    umap_kwargs=None,
+):
     """
-    Takes the global FEATURE_STORE, runs t-SNE per layer
-    on the first validation batch, plots, then clears the store.
+    Collect features from FEATURE_STORE (global dict name->tensor),
+    slice middle Z, color by label_volume, class-balance, and plot
+    t-SNE/UMAP grids.
+
+    Parameters
+    ----------
+    writer : SummaryWriter
+    epoch : int
+    label_volume : np.ndarray [D,H,W]
+    layer_order : sequence[str]
+        Ordered list of layer names (e.g., LAYER_ORDER from registration).
+    max_layers : int
+        Cap number plotted.
+    mode : 'tsne' | 'umap' | 'both'
+    tsne_kwargs, umap_kwargs : dict
+        Passed into reducers.
     """
-    pca_img_lst               = []
-    tsne_encoded_feats_lst    = []
-    tsne_label_lst            = []
-    plot_tag_lst = []
+    import numpy as np
+    from scipy.ndimage import zoom
 
-    for k in FEATURE_STORE.keys()[:max_layers]:
-        feat = FEATURE_STORE[k][-1]          # last batch only
-        feat = feat.detach().cpu().squeeze().numpy()
-            
-        feat = np.moveaxis(feat,0,-1)            # [D, H, W,C]
-        lbl  = label_volume          # [D, H, W]
-        feat2d = feat[int(feat.shape[0]//2 ),:]           # [H, W, C]
-        lbl2d  = lbl[int(lbl.shape[0]//2),:]               # [H, W]
-        H,W,C = feat2d.shape
+    pca_img_lst            = []
+    tsne_encoded_feats_lst = []
+    tsne_label_lst         = []
+    plot_tag_lst           = []
 
-        rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1,C), (H, W))
+    # iterate in the provided order
+    for k in list(layer_order)[:max_layers]:
+        if k not in FEATURE_STORE:
+            continue
+
+        # you stored single tensor per key; if you still store list use [-1]
+        out_t = FEATURE_STORE[k][-1] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
+        feat = out_t.detach().cpu().squeeze().numpy()  # assume [C,D,H,W] or [D,H,W,C]? adjust below
+
+        # Reorder to [D,H,W,C] assuming channel-first
+        if feat.ndim == 4 and feat.shape[0] not in (label_volume.shape[0],):  # crude heuristic
+            # assume feat is [C,D,H,W] -> moveaxis 0->-1
+            feat = np.moveaxis(feat, 0, -1)
+        elif feat.ndim == 4 and feat.shape[-1] not in (label_volume.shape[0],):
+            # already channel-last; leave
+            pass
+        else:
+            raise ValueError(f"Unexpected feature shape for {k}: {feat.shape}")
+
+
+        feat2d = feat[int(feat.shape[0]//2),:]            # [H,W,C]
+        lbl2d  = label_volume[int(label_volume.shape[0]//2),:]    # [H,W]
+
+        H, W, C = feat2d.shape
+
+        # PCA→RGB preview
+        rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1, C), (H, W))
         pca_img_lst.append(rgb_img)
 
-        zoom_factor = [y / x for y, x in zip((H, W), lbl2d.shape)]
+        # Align labels to feature resolution
+        zoom_factor = [H / lbl2d.shape[0], W / lbl2d.shape[1]]
         label_zoomed = zoom(lbl2d, zoom_factor, order=0)
+
         mask = label_zoomed >= 0
         fg_feats_flat = feat2d[mask]
         fg_label_flat = label_zoomed[mask]
-        blced_fg_feats_flat,blced_fg_label_flat = class_balance(fg_feats_flat,fg_label_flat)
-        tsne_encoded_feats_lst.append(blced_fg_feats_flat)
-        tsne_label_lst.append(blced_fg_label_flat)
+
+        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat)
+        tsne_encoded_feats_lst.append(blced_feats)
+        tsne_label_lst.append(blced_labels)
         plot_tag_lst.append(k)
 
-        # --------------- plot -----------------
-    tsne_grid_plot(tsne_encoded_feats_lst,tsne_label_lst,writer,tag_list=plot_tag_lst,step=epoch)
-    plot_pca_maps(pca_img_lst,writer=writer,tag=f"pca/{k}",step=epoch,ncols=len(pca_img_lst))
+    # Embedding grid(s)
+    umap_tsne_grid_plot(
+        tsne_encoded_feats_lst,
+        tsne_label_lst,
+        writer,
+        tag=f"embed_grid/epoch{epoch}",
+        step=epoch,
+        tag_list=plot_tag_lst,
+        mode=mode,
+        tsne_kwargs=tsne_kwargs,
+        umap_kwargs=umap_kwargs,
+        filter_label=0,
+    )
 
+    # PCA image grid
+    plot_pca_maps(
+        pca_img_lst,
+        writer=writer,
+        tag=f"pca/epoch{epoch}",
+        step=epoch,
+        ncols=len(pca_img_lst),
+    )
 
-    FEATURE_STORE.clear()   # free memory
+    FEATURE_STORE.clear()  # free memory
 
 #%%
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -184,6 +249,8 @@ args.data_path_dir = "/home/confetti/data/rm009/v1_roi1_seg/rois"
 args.valid_data_path_dir = "/home/confetti/data/rm009/v1_roi1_seg_valid/rois"
 args.feats_level = 3
 args.feats_avg_kernel = 8
+args.last_encoder=True
+
 
 C            = 12          # channels returned by cmpsd_model
 num_classes  = 8
@@ -192,6 +259,14 @@ seg_head     = ConvSegHead(C, num_classes).to(device)
 
 cmpsd_model.train()
 seg_head.train()
+
+
+data_prefix = Path("/share/home/shiqiz/data" if args.e5 else "/home/confetti/data")
+
+mlp_feat_names = ['rm009_smallestv1roi_oridfar256_l2_pool8_10000.pth','rm009_smallestv1roi_postopk_nview4_l2_avg8.pth','rm009_smallestv1roi_postopk_nview6_l2_avg8.pth']
+cnn_ckpt_pth = data_prefix / "weights" / "rm009_3d_ae_best.pth"
+mlp_ckpt_pth = data_prefix/ "weights"/ mlp_feat_names[0]
+
 
 summary(cmpsd_model,(1,*args.input_size))
 summary(seg_head,(12,64,64,64))
@@ -203,6 +278,7 @@ print(f"{seg_head= }")
 register_hooks(cmpsd_model.cnn_encoder, "cnn.")
 register_hooks(cmpsd_model.mlp_encoder, "mlp.")
 register_hooks(seg_head,              "head.")
+print("Registered layers:", LAYER_ORDER)
 
 args.lr_start = 1e-3
 args.lr_end = 1e-5
@@ -236,7 +312,7 @@ valid_label_volume = valid_label_volume -1 # class number rearrange from 0 to N-
 
 exp_save_dir   = 'outs/seg_head'
 # exp_name       = f"test8_level{args.feats_level}_avg_pool{args.feats_avg_kernel}"
-exp_name       = f"temp_training_from_scratch_level{args.feats_level}_avg_pool{args.feats_avg_kernel}_3"
+exp_name       = f"finetune_level{args.feats_level}_avg_pool{args.feats_avg_kernel}_3"
 model_save_dir = f"{exp_save_dir}/{exp_name}"
 os.makedirs(model_save_dir, exist_ok=True)
 
@@ -287,7 +363,17 @@ for epoch in tqdm(range(args.num_epochs)):
         writer.add_scalar('Loss/valid', v_loss, epoch)
         writer.add_scalar("top1_acc/valid", avg_top1, epoch)
         writer.add_scalar("top3_acc/valid", avg_top3, epoch)
-        log_tsne(writer, epoch, valid_label_volume) #log_tsne will use the last feature collected by FEATURE_STORE dict
+        # log_tsne(writer, epoch, valid_label_volume) #log_tsne will use the last feature collected by FEATURE_STORE dict
+        log_layer_embeddings(
+            writer=writer,
+            epoch=epoch,
+            label_volume=valid_label_volume,  # numpy array
+            layer_order=LAYER_ORDER,       # from hook registration
+            max_layers=12,
+            mode="both",                   # <- t-SNE + UMAP stacked
+            tsne_kwargs=dict(perplexity=20),
+            umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
+        )
 
     if (epoch % (4 * args.valid_very_epoch)) == 0:
         seg_valid(train_img_logger, loader, cmpsd_model, seg_head, epoch)

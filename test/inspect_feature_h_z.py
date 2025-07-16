@@ -226,7 +226,6 @@ data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data
 
 
 mlp_feat_names = ['rm009_smallestv1roi_oridfar256_l2_pool8_10000.pth','rm009_smallestv1roi_postopk_nview4_l2_avg8.pth','rm009_smallestv1roi_postopk_nview6_l2_avg8.pth']
-
 cnn_ckpt = data_prefix / "weights" / "rm009_3d_ae_best.pth"
 mlp_ckpt_path_lst = [data_prefix/ "weights"/ckpt_name for ckpt_name in mlp_feat_names]
 

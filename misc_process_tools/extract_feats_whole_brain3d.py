@@ -55,6 +55,7 @@ from helper.image_reader import Ims_Image
 #%%
 
 local_img_pth ="/home/confetti/e5_data/rm009/rm009.ims"
+local_img_pth = '/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
 cluster_img_pth ="/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/RM009_all_/009.ims"  
 
 raw_img_pth = cluster_img_pth if E5 else local_img_pth 
@@ -63,15 +64,44 @@ ims_vol=Ims_Image(raw_img_pth,channel=0)
 level = 0
 raw_volume_size =ims_vol.rois[level][3:] 
 print(f"raw_volume_size{raw_volume_size}")
+#%%
 # whole_volume_size = [int(element//2) for element in raw_volume_size]
 # whole_volume_offset = [int(element//4) for element in raw_volume_size]
-whole_volume_size = [4096,6656,6048] 
+whole_volume_size = raw_volume_size 
 # whole_volume_size = [64,2048,2048] 
-whole_volume_offset = [8192,2560,1536]
+whole_volume_offset = [0,0,0]
+
+#%% check for the roi to be extracted feats on
+import numpy as np
+z_offset,y_offset,x_offset = whole_volume_offset 
+z_span     = whole_volume_size[0]   # distance from first to last (your "+3750")
+z_last     = z_offset + z_span   # = 5125  (you used this for last_z_slice)
+
+y_size , x_size = whole_volume_size[1:]
+
+n_slices = 6
+
+# Evenly spaced (including first & last)
+z_indices = np.round(np.linspace(z_offset, z_last, n_slices)).astype(int)
+
+# Pull the slices
+slices = [
+    ims_vol.from_roi(
+        coords=(z, y_offset, x_offset, 1, y_size, x_size),level=0)
+    for z in z_indices]
+
+# Optionally stack into an array of shape (6, Y, X)
+import numpy as np
+slices_ary = np.stack(slices, axis=0)
+import napari
+viewer = napari.Viewer()
+viewer.add_image(slices_ary)
+napari.run()
+
 print(f"whole_volume_size{whole_volume_size}")
 print(f"whole_volume_offset{whole_volume_offset}")
-batch_size = 256 
 #%%
+batch_size = 256 
 
 # when extracting features in t11(resol=1um), the roi_size =64, roi_stride=16, 
 # so when processing the 4 um rm009, the roi_size = 16, roi_stride=4
