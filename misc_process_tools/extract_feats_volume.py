@@ -250,13 +250,13 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("config/rm009.yaml")
+cfg = load_cfg("../config/rm009.yaml")
 avg_pool = None
 cfg.avg_pool_size = [avg_pool] * 3
 cfg.filters = [32,64]
 cfg.kernel_size = [5,5]
 
-E5= True
+E5 =False
 if E5:
     data_prefix = "/share/home/shiqiz/data"
     workspace_prefix = "/share/home/shiqiz/workspace/hive1"
@@ -267,8 +267,8 @@ else:
 
 model = build_encoder_model(cfg, dims=3)
 load_encoder2encoder(model, f"{data_prefix}/weights/rm009_3d_ae_best.pth")
-# vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
-vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
+vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
+# vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
 save_zarr_path = f"{data_prefix}/rm009/feats_l2_avg8_z13750_z17499C4.zarr"
 #%%
 
@@ -350,6 +350,7 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False):
 
 
 #%%
+save_zarr_path = f"/home/confetti/e5_data/rm009/feats_l2_avg8_z13750_z17499C4.zarr"
 summarise_zarr(save_zarr_path)
 plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True)
 #%%

@@ -14,6 +14,7 @@ act_mode: 'elu'
 norm_mode: 'none'
 #_______for mlp_encoder_____
 mlp_filters: [96,48,24,12]
+last_encoder: False
 
 #____for region_feature_extract___, is applied after cnn_encoder
 avg_pool_size: [2,8,8] 

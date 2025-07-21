@@ -33,13 +33,14 @@ from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
     cos_loss_topk,
     get_rm009_eval_data,
-    valid_from_roi,
     MLP,
     Contrastive_dataset_3d,
     load_checkpoint,
     save_checkpoint,
+    log_layer_embeddings,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
+from lib.core.scheduler import WarmupCosineLR
 
 # =============================================================================
 # Utility helpers
@@ -56,9 +57,80 @@ def parse_args() -> argparse.Namespace:
 # Training helpers
 # =============================================================================
 
+from collections import defaultdict
+from functools import partial
+from typing import Sequence, Tuple, Union, Literal, List
+Arr   = Union[np.ndarray, torch.Tensor]
+Array = Union[Arr, Sequence[Arr]]   # single array or list/tuple of arrays
+
+FEATURE_STORE = defaultdict(list)      # {layer_name: [Tensor, ...]}
+HOOK_HANDLES  = []                     # so we can remove them cleanly
+LAYER_ORDER   = []
+
+def _hook(layer_name, module, inp, out):
+    """
+    out : Tensor shape [B, C, D, H, W] or [B, C, H, W]
+    We keep it on CPU to avoid GPU memory churn.
+    """
+    FEATURE_STORE[layer_name].append(out.detach().cpu())
+
+def register_hooks(model, prefix=""):
+    """
+    Recursively register a forward hook on *leaf* modules that have weights.
+    The prefix guarantees unique names.
+    """
+    for name, m in model.named_children():
+        full_name = f"{prefix}{name}"
+        # is leaf (= no children) AND has parameters → treat as a layer of interest
+        if sum(1 for _ in m.children()) == 0 and sum(p.numel() for p in m.parameters()) > 0:
+            LAYER_ORDER.append(full_name)  # <-- capture order
+            HOOK_HANDLES.append(m.register_forward_hook(partial(_hook, full_name)))
+        else:
+            register_hooks(m, f"{full_name}.")
+
+
+
 def proxy_accuracy(pos_cos: torch.Tensor, neg_cos: torch.Tensor) -> float:
     """Fraction where positive similarity > negative (just a rough metric)."""
     return (pos_cos > neg_cos).float().mean().item()
+
+
+
+def valid_from_roi(model, epoch, eval_data, writer):
+    """Evaluate a model on a list of ROIs.
+
+    Works with feature tensors of shape:
+        • (C, H, W)                      – old behaviour
+        • (C, D, H, W)                  – channel-first 3-D
+        • (D, H, W, C)                  – channel-last 3-D
+    For 3-D inputs, the middle depth slice (z = D//2) is used for PCA/t-SNE.
+    """
+    model.eval()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    for idx, data_dic in enumerate(eval_data):
+        roi      = data_dic['img']          # numpy (H,W) or (D,H,W)
+        label    = data_dic['label']
+        if len(label.shape)==2:
+            label = label[np.newaxis,:]
+
+        inp = torch.from_numpy(roi).unsqueeze(0).unsqueeze(0).float().to(device)
+        _ = model(inp).detach().cpu().numpy().squeeze() # np.ndarray
+
+        #current impl does not support label for different roi
+        log_layer_embeddings(
+            FEATURE_STORE,
+            writer=writer,
+            epoch=epoch,
+            label_volume=label,  # numpy array
+            layer_order=LAYER_ORDER,       # from hook registration
+            max_layers=15,
+            mode="both",                   # <- t-SNE + UMAP stacked
+            tsne_kwargs=dict(perplexity=20),
+            umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
+        )
+        
 
 
 def train_one_epoch(
@@ -105,7 +177,9 @@ def train_one_epoch(
 @torch.no_grad()
 def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
              device: torch.device, epoch: int, writer: SummaryWriter, *,
-             cnn_ckpt: Path, dims):
+             cnn_ckpt: Path, dims,):
+    #discard the last eval layer embeddings
+    FEATURE_STORE.clear()
     # refresh composite encoder weights
     load_compose_encoder_dict(cmpsd_model, str(cnn_ckpt), mlp_weight_dict=model.state_dict(), dims=dims)
     valid_from_roi(cmpsd_model, epoch, eval_data, writer)
@@ -121,8 +195,8 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"v1_l2_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}"
-    run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1_roi'/ exp_name
+    exp_name = f"l2_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
+    run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -130,7 +204,7 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "feats_l2_avg8_z16176_z16299C4.zarr"
+    feats_name = "feats_l2_avg8_z13750_z17499C4.zarr"
     feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
     feats_map = feats_map[:]
@@ -144,12 +218,22 @@ def main():
     cfg.mlp_filters = filters_map[level_key]
 
     model = MLP(cfg.mlp_filters).to(device)
+
+    #cmpsd_model for eval features in cnn and mlp, register hooks to it
     cmpsd_model = build_final_model(cfg).to(device)
     cmpsd_model.eval()
+    register_hooks(cmpsd_model.cnn_encoder, "cnn.")
+    register_hooks(cmpsd_model.mlp_encoder, "mlp.")
+    print("Registered layers:", LAYER_ORDER)
 
     # --------------- optim & sched ----------------- #
-    optimizer = optim.Adam(model.parameters(), lr=cfg.get("lr_start", 5e-3))
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=cfg.get("lr_gamma", 0.998))
+    optimizer = optim.Adam(model.parameters(), lr=2e-4)
+
+    scheduler= torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=50,     # length of the first cycle (epochs or steps—your call)
+        T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
+    )
 
     # --------------- resume logic ------------------ #
     start_epoch = 0
@@ -161,7 +245,7 @@ def main():
     writer = SummaryWriter(log_dir=run_dir / "tb")
 
     # ---------------- validation data -------------- #
-    eval_data = get_rm009_eval_data(E5=cfg.e5)
+    eval_data = get_rm009_eval_data(E5=cfg.e5,img_no_list=[1])
     cnn_ckpt = data_prefix / "weights" / "rm009_3d_ae_best.pth"
 
     # ---------------- training loop ---------------- #
@@ -177,8 +261,8 @@ def main():
                         only_pos=True)
         scheduler.step()
         # validation
-        if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs:
-            validate(model, cmpsd_model, eval_data, device, epoch, writer,cnn_ckpt=cnn_ckpt, dims=cfg.dims)
+        if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs or epoch ==0:
+            validate(model, cmpsd_model, eval_data, device, epoch, writer,cnn_ckpt=cnn_ckpt, dims=cfg.dims,)
 
         # reshuffle dataset
         if (epoch + 1) % shuffle_every == 0:

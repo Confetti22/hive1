@@ -9,12 +9,10 @@ import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from scipy.ndimage import zoom
-from confettii.plot_helper import three_pca_as_rgb_image
 import tifffile as tif
 from config.load_config import load_cfg
 from helper.image_seger import ConvSegHead
-from helper.contrastive_train_helper import tsne_grid_plot,umap_tsne_grid_plot, plot_pca_maps,class_balance
+from helper.contrastive_train_helper import log_layer_embeddings 
 from lib.arch.ae import build_final_model        # already in your script
 from distance_contrast_helper import HTMLFigureLogger
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
@@ -134,109 +132,6 @@ def seg_valid(img_logger, valid_loader, cmpsd_model, seg_head, epoch,last_val_la
     avg_top3 = sum(total_top3)/len(total_top3)
 
     return avg_valid_loss, avg_top1,avg_top3
-
-def log_layer_embeddings(
-    writer,
-    epoch,
-    label_volume,
-    layer_order,
-    max_layers=12,
-    mode="tsne",
-    tsne_kwargs=None,
-    umap_kwargs=None,
-):
-    """
-    Collect features from FEATURE_STORE (global dict name->tensor),
-    slice middle Z, color by label_volume, class-balance, and plot
-    t-SNE/UMAP grids.
-
-    Parameters
-    ----------
-    writer : SummaryWriter
-    epoch : int
-    label_volume : np.ndarray [D,H,W]
-    layer_order : sequence[str]
-        Ordered list of layer names (e.g., LAYER_ORDER from registration).
-    max_layers : int
-        Cap number plotted.
-    mode : 'tsne' | 'umap' | 'both'
-    tsne_kwargs, umap_kwargs : dict
-        Passed into reducers.
-    """
-    import numpy as np
-    from scipy.ndimage import zoom
-
-    pca_img_lst            = []
-    tsne_encoded_feats_lst = []
-    tsne_label_lst         = []
-    plot_tag_lst           = []
-
-    # iterate in the provided order
-    for k in list(layer_order)[:max_layers]:
-        if k not in FEATURE_STORE:
-            continue
-
-        # you stored single tensor per key; if you still store list use [-1]
-        out_t = FEATURE_STORE[k][-1] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
-        feat = out_t.detach().cpu().squeeze().numpy()  # assume [C,D,H,W] or [D,H,W,C]? adjust below
-
-        # Reorder to [D,H,W,C] assuming channel-first
-        if feat.ndim == 4 and feat.shape[0] not in (label_volume.shape[0],):  # crude heuristic
-            # assume feat is [C,D,H,W] -> moveaxis 0->-1
-            feat = np.moveaxis(feat, 0, -1)
-        elif feat.ndim == 4 and feat.shape[-1] not in (label_volume.shape[0],):
-            # already channel-last; leave
-            pass
-        else:
-            raise ValueError(f"Unexpected feature shape for {k}: {feat.shape}")
-
-
-        feat2d = feat[int(feat.shape[0]//2),:]            # [H,W,C]
-        lbl2d  = label_volume[int(label_volume.shape[0]//2),:]    # [H,W]
-
-        H, W, C = feat2d.shape
-
-        # PCA→RGB preview
-        rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1, C), (H, W))
-        pca_img_lst.append(rgb_img)
-
-        # Align labels to feature resolution
-        zoom_factor = [H / lbl2d.shape[0], W / lbl2d.shape[1]]
-        label_zoomed = zoom(lbl2d, zoom_factor, order=0)
-
-        mask = label_zoomed >= 0
-        fg_feats_flat = feat2d[mask]
-        fg_label_flat = label_zoomed[mask]
-
-        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat)
-        tsne_encoded_feats_lst.append(blced_feats)
-        tsne_label_lst.append(blced_labels)
-        plot_tag_lst.append(k)
-
-    # Embedding grid(s)
-    umap_tsne_grid_plot(
-        tsne_encoded_feats_lst,
-        tsne_label_lst,
-        writer,
-        tag=f"embed_grid/epoch{epoch}",
-        step=epoch,
-        tag_list=plot_tag_lst,
-        mode=mode,
-        tsne_kwargs=tsne_kwargs,
-        umap_kwargs=umap_kwargs,
-        filter_label=0,
-    )
-
-    # PCA image grid
-    plot_pca_maps(
-        pca_img_lst,
-        writer=writer,
-        tag=f"pca/epoch{epoch}",
-        step=epoch,
-        ncols=len(pca_img_lst),
-    )
-
-    FEATURE_STORE.clear()  # free memory
 
 #%%
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -365,6 +260,7 @@ for epoch in tqdm(range(args.num_epochs)):
         writer.add_scalar("top3_acc/valid", avg_top3, epoch)
         # log_tsne(writer, epoch, valid_label_volume) #log_tsne will use the last feature collected by FEATURE_STORE dict
         log_layer_embeddings(
+            FEATURE_STORE,
             writer=writer,
             epoch=epoch,
             label_volume=valid_label_volume,  # numpy array
