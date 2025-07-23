@@ -97,6 +97,9 @@ def save_rois_to_dirs(roi_images, roi_masks, roi_dir, mask_dir):
 
 
 def main1():
+    """
+    collect correspond z_slice to merge into 32-depth volume and then crop into rois and filter based on mask-nonzero percentage
+    """
     global LAST_CNT,CNT
     ap = argparse.ArgumentParser(description="Strict 4µm slice stacking around each 1µm mask z index.")
     ap.add_argument("--mask_dir", default="/home/confetti/data/rm009/rm009_roi/single_layer/merged_bnds/upscaled_before_smooth/masks",  type=Path)
@@ -107,6 +110,7 @@ def main1():
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+
     masks = find_masks(args.mask_dir)
     if not masks:
         print(f"No mask files in {args.mask_dir}", file=sys.stderr)
@@ -144,47 +148,33 @@ def main1():
 def main2():
     global LAST_CNT,CNT
     ap = argparse.ArgumentParser(description="Strict 4µm slice stacking around each 1µm mask z index.")
-    ap.add_argument("--mask_dir", default="/home/confetti/data/rm009/rm009_roi/single_layer/merged_bnds/upscaled_before_smooth/masks",  type=Path)
-    ap.add_argument("--img_dir",  default="/home/confetti/data/rm009/boundary_seg/ori_img_stack",  type=Path)
+    ap.add_argument("--mask_dir", default="/home/confetti/data/rm009/boundary_seg/ori_mask_valid",  type=Path)
+    ap.add_argument("--img_dir",  default="/home/confetti/data/rm009/boundary_seg/ori_img_stack_valid",  type=Path)
     args = ap.parse_args()
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    masks = find_masks(args.mask_dir)
-    if not masks:
-        print(f"No mask files in {args.mask_dir}", file=sys.stderr)
-        sys.exit(1)
 
-    missing_logs = []
-    made = 0
-    save_roi_dir ="/home/confetti/data/rm009/boundary_seg/rois"
-    save_mask_dir ="/home/confetti/data/rm009/boundary_seg/masks"
-    for z_idx, mask_path in tqdm(masks, desc="Masks"):
-        stack, z_range, missing = build_stack(z_idx, args.img_dir)
-        base = mask_path.stem  # merged-Zddddd
-        if stack is None:
-            missing_logs.append(f"{base}: MISSING {len(missing)} / {TOTAL_SLICES} -> {missing}")
-            continue
+    img_files = sorted(
+                    [os.path.join(args.img_dir, fname) 
+                    for fname in os.listdir(args.img_dir) 
+                    if fname.endswith('.tif')])
+
+    mask_files = sorted(
+                    [os.path.join(args.mask_dir, fname) 
+                    for fname in os.listdir(args.mask_dir) 
+                    if fname.endswith('.tif')])
+
+    save_roi_dir ="/home/confetti/data/rm009/boundary_seg/valid_rois"
+    save_mask_dir ="/home/confetti/data/rm009/boundary_seg/valid_masks"
+    for img_path, mask_path in tqdm(zip(img_files,mask_files), desc="Masks"):
+        img = tif.imread(img_path)
         mask = tif.imread(mask_path)
+        base = Path(mask_path).stem  # merged-Zddddd
+
         LAST_CNT = CNT
-        roi_list, mask_list = crop_3d_with_stride_and_filter(stack,mask=mask[None,...],crop_size=[32,1024,1024],stride=512,threshold=0.08)
+        roi_list, mask_list = crop_3d_with_stride_and_filter(img,mask=mask,crop_size=[32,1024,1024],stride=512,threshold=0.08)
         save_rois_to_dirs(roi_list,mask_list,roi_dir=save_roi_dir,mask_dir=save_mask_dir)
+        print(f"{base}finished")
         
-
-
-
-        out_name = f"{base}{args.suffix}.tif"
-        out_path = args.out_dir / out_name
-        tif.imwrite(out_path, stack, dtype=stack.dtype)
-        made += 1
-
-    # Summary
-    print(f"\nCreated {made} stacks. Skipped {len(missing_logs)}.")
-
-    if missing_logs:
-        log_path = args.out_dir / args.log_name
-        with open(log_path, "w") as f:
-            f.write("\n".join(missing_logs))
-        print(f"Missing details written to: {log_path}")
 
 if __name__ == "__main__":
     main2()

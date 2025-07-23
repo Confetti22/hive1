@@ -40,7 +40,7 @@ class HTMLFigureLogger:
     def add_figure(self, tag, fig, global_step):
         img_filename = f"{tag}_{global_step}.png".replace("/", "_")
         img_path     = self.images_dir / img_filename
-        fig.savefig(img_path, bbox_inches='tight')
+        fig.savefig(img_path, dpi=300,bbox_inches='tight')
         plt.close(fig)
         self.entries.append((img_path, img_filename, tag, global_step))
 

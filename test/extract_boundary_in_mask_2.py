@@ -802,14 +802,14 @@ def report_max_mem():
 
 if __name__ == "__main__":  # simple smoke test
 
-    save_dir = "/home/confetti/data/rm009/boundary_seg"
+    save_dir = "/home/confetti/data/rm009/boundary_seg/valid_bnd_masks"
     os.makedirs(save_dir,exist_ok=True)
 
     from pathlib import Path
-    dir_path = Path("/home/confetti/data/rm009/boundary_seg/masks")
+    dir_path = Path("/home/confetti/data/rm009/boundary_seg/valid_masks")
     tif_paths = sorted(p for p in dir_path.iterdir() if p.suffix.lower() in {".tif", ".tiff"})
 
-    SAVE_PAIR_WISE_BND  = True 
+    SAVE_PAIR_WISE_BND  = False 
 
     for mask_path in tif_paths:
         base_name = Path(mask_path).stem
@@ -821,7 +821,7 @@ if __name__ == "__main__":  # simple smoke test
 
         params = PipelineParams(
             boundary=BoundaryParams(
-                thin= True,        # we want thick band
+                thin= False,        # we want thick band
                 thick_r=1,         # ~5 vox; raise to 3 if you want ~7
                 include_bg_layers=(1,8)
             ),
@@ -831,7 +831,8 @@ if __name__ == "__main__":  # simple smoke test
         bnd, Ls_ord, Ls_raw = compute_cortical_boundaries(
             L_raw3d,
             params=params,
-            coding_type='ordered'
+            coding_type='ordered',
+            smooth_mask=False,
         )
 
         if SAVE_PAIR_WISE_BND:
@@ -868,7 +869,7 @@ if __name__ == "__main__":  # simple smoke test
             Ls_ord_out = Ls_ord
             Ls_raw_out = Ls_raw       
 
-        # tifffile.imwrite(f"{save_dir}/{base_name}_bnd_thick.tif", bnd_out.astype('uint8'))
+        tifffile.imwrite(f"{save_dir}/{base_name}_bnd_thick.tif", bnd_out.astype('uint8'))
         # tifffile.imwrite(f"{save_dir}/{base_name}_ord.tif",       Ls_ord_out.astype('uint8'))
         # tifffile.imwrite(f"{save_dir}/{base_name}_raw.tif",       Ls_raw_out.astype('uint8'))
         print(f"[{base_name}] boundary mask saved (was_2d={was_2d})")

@@ -76,7 +76,7 @@ num_pairs: 16384
 start_epoch: 0
 batch_size: 8 
 shuffle_very_epoch: 50 
-valid_very_epoch: 50
+valid_very_epoch: 20
 save_very_epoch: 50
 n_views: 4 
 pos_weight_ratio: 2
