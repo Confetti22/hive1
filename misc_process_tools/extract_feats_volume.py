@@ -75,7 +75,7 @@ class VolumeReader:
     @property
     def shape(self) -> Tuple[int, int, int]:
         """Return full volume shape (D, H, W)."""
-        if hasattr(self._handle, "rois"):
+        if hasattr(self._handle, "rois"): #if ims image
             return tuple(int(x) for x in self._handle.rois[0][3:])
         return self._handle.data.shape  # tifffile memmap
 
@@ -85,12 +85,9 @@ class VolumeReader:
         z, y, x = offset
         d, h, w = size
         if hasattr(self._handle, "from_roi"):
-            coords = np.array([z, y, x, d, h, w])
-            return self._handle.from_roi(coords=coords, level=0)  # IMS path
-        # tifffile path – array-like interface supports basic slicing
-        return self._handle[z : z + d, y : y + h, x : x + w]
-
-
+            coords = np.array([z, y, x, d, h, w])  # IMS path
+            return self._handle.from_roi(coords=coords, level=0)  
+        return self._handle[z : z + d, y : y + h, x : x + w]  # tifffile path 
 
 # -----------------------------------------------------------------------------
 #                  C o o r d i n a t e   m a p p i n g   h e l p e r
@@ -136,8 +133,11 @@ def _register_hook(layer: nn.Module, buffer: dict[str, torch.Tensor]):
 def extract_features_to_zarr(
     *,
     vol_path: Union[str, Path],
+    channel:int = 0, #channel for ims image
     model: nn.Module,
     zarr_path: Union[str, Path],
+    global_offset: Tuple[int,int,int]= (0,0,0),
+    whole_volume_size =None,
     region_size: Tuple[int, int, int],
     roi_size: Tuple[int, int, int],
     roi_stride: Tuple[int, int, int],
@@ -145,7 +145,7 @@ def extract_features_to_zarr(
     device: str = "cuda",
     # NEW ↓
     layer_path: str = "",           # path to layer inside the model (“” = model output)
-    pool_size: int | None = None,   # e.g. 4 → AvgPool3d(4, stride=1)
+    pool_size: int | None = None,   # applied after model, so if model contains pool_size, do not apply twice
 ) -> None:
     """Extract a *single* feature map (optionally pooled) and store it in Zarr."""
     model.eval().to(device)
@@ -173,8 +173,11 @@ def extract_features_to_zarr(
     margin = [int(s * s_size) for s, s_size in zip(step, roi_stride)]
     region_stride = [int(r_size - m) for r_size, m in zip(region_size, margin)]
 
-    with VolumeReader(vol_path) as volume:
-        d, h, w = volume.shape
+    with VolumeReader(vol_path,channel=channel) as volume:
+        if whole_volume_size:
+            d, h, w = whole_volume_size
+        else:
+            d, h, w = volume.shape
         num_blocks = [
             math.ceil((d - region_size[0]) / region_stride[0]) + 1,
             math.ceil((h - region_size[1]) / region_stride[1]) + 1,
@@ -198,9 +201,9 @@ def extract_features_to_zarr(
             for by in range(num_blocks[1]):
                 for bx in range(num_blocks[2]):
                     offset = (
-                        bz * region_stride[0],
-                        by * region_stride[1],
-                        bx * region_stride[2],
+                        bz * region_stride[0] + global_offset[0],
+                        by * region_stride[1] + global_offset[1],
+                        bx * region_stride[2] + global_offset[2],
                     )
                     block = volume.read_block(offset=offset, size=region_size)
 
@@ -250,12 +253,15 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("../config/rm009.yaml")
-avg_pool = None
+cfg = load_cfg("config/t11_3d.yaml")
+avg_pool = 8 
 cfg.avg_pool_size = [avg_pool] * 3
-cfg.filters = [32,64]
-cfg.kernel_size = [5,5]
+cfg.last_encoder = True 
+# cfg.filters = [32,64]
+# cfg.kernel_size = [5,5]
+# %%
 
+#%%
 E5 =False
 if E5:
     data_prefix = "/share/home/shiqiz/data"
@@ -266,23 +272,28 @@ else:
 
 
 model = build_encoder_model(cfg, dims=3)
-load_encoder2encoder(model, f"{data_prefix}/weights/rm009_3d_ae_best.pth")
-vol_path= "/home/confetti/data/rm009/rm009_roi/z16176_z16299C4.tif"
+load_encoder2encoder(model, f"{data_prefix}/weights/t11_3d_ae_best2.pth")
+vol_path = "/home/confetti/e5_data/t1779/t1779.ims" 
 # vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
-save_zarr_path = f"{data_prefix}/rm009/feats_l2_avg8_z13750_z17499C4.zarr"
-#%%
+save_zarr_path = f"{data_prefix}/t1779/test_ae_feats_nissel_l3_avg8_rhemisphere.zarr"
 
+#%%
 extract_features_to_zarr(
     vol_path= vol_path,
+    channel=2,
     model=model,
     zarr_path=save_zarr_path,
-    region_size=(64, 1024, 1024),
-    roi_size=(32,32,32),
-    roi_stride=(8,8,8),
-    batch_size=8192,
+    # global_offset=(3392,2000,7008),
+    global_offset=(6400,2000,7008),
+    # whole_volume_size=(6784,5024,4200),
+    whole_volume_size=(64,5024,4200),
+    region_size=(64, 1536, 1536),
+    roi_size=(64,64,64),
+    roi_stride=(16,16,16),
+    batch_size= 1024,
     device="cuda",
-    layer_path="down_layers.0",  # pick *one* internal layer
-    pool_size=8,                 # or None / 1 for “no pooling”
+    # layer_path="down_layers.0",  # pick *one* internal layer
+    # pool_size=8,                 # or None / 1 for “no pooling”
 )
 
 
@@ -298,8 +309,8 @@ def summarise_zarr(path: str | Path):
     print(f"Shape  : {arr.shape}\nChunks : {arr.chunks}\nDType  : {arr.dtype}\n")
 
 
-def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False):
-    """Maximum‑projection slices along Z/Y/X for a quick sanity check.
+def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False, channel_axis: int = -1):
+    """Maximum-projection slices along Z/Y/X for a quick sanity check.
 
     Parameters
     ----------
@@ -308,25 +319,47 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False):
     n : int, default 6
         How many slices per axis to show.
     pca_rgb : bool, default False
-        If *True*, also show an RGB PCA view of the middle Z‑slice.
+        If *True*, also show an RGB PCA view of the middle Z-slice.
+    channel_axis : int, default -1
+        Channel axis location. Use -1 for channel-last (D,H,W,C),
+        or 0 for channel-first (C,D,H,W).
     """
+    if channel_axis not in (-1, 0):
+        raise ValueError("channel_axis must be -1 (C-last) or 0 (C-first).")
+
     arr = zarr.open(str(path), mode="r")
-    D, H, W, C = arr.shape
+    if arr.ndim != 4:
+        raise ValueError(f"Expected a 4D array, got shape {arr.shape}.")
+
+    if channel_axis == -1:
+        D, H, W, C = arr.shape
+        z_img = lambda z: arr[z, :, :, :].max(-1)
+        y_img = lambda y: arr[:, y, :, :].max(-1)
+        x_img = lambda x: arr[:, :, x, :].max(-1).T
+        get_mid_slice_for_pca = lambda mid_z: arr[mid_z, :, :, :]  # (H, W, C)
+    else:  # channel_axis == 0  -> (C, D, H, W)
+        C, D, H, W = arr.shape
+        z_img = lambda z: arr[:, z, :, :].max(0)
+        y_img = lambda y: arr[:, :, y, :].max(0)
+        x_img = lambda x: arr[:, :, :, x].max(0).T
+        # Convert (C, H, W) -> (H, W, C) for PCA
+        get_mid_slice_for_pca = lambda mid_z: np.moveaxis(arr[:, mid_z, :, :], 0, -1)
+
     z_lin = np.linspace(0, D - 1, n, dtype=int)
     y_lin = np.linspace(0, H - 1, n, dtype=int)
     x_lin = np.linspace(0, W - 1, n, dtype=int)
 
     fig, axes = plt.subplots(3, n, figsize=(3 * n, 9))
     for i, z in enumerate(z_lin):
-        axes[0, i].imshow(arr[z, :, :, :].max(-1), cmap="gray")
+        axes[0, i].imshow(z_img(z), cmap="gray")
         axes[0, i].set_title(f"Z {z}")
         axes[0, i].axis("off")
     for i, y in enumerate(y_lin):
-        axes[1, i].imshow(arr[:, y, :, :].max(-1), cmap="gray")
+        axes[1, i].imshow(y_img(y), cmap="gray")
         axes[1, i].set_title(f"Y {y}")
         axes[1, i].axis("off")
     for i, x in enumerate(x_lin):
-        axes[2, i].imshow(arr[:, :, x, :].max(-1).T, cmap="gray")
+        axes[2, i].imshow(x_img(x), cmap="gray")
         axes[2, i].set_title(f"X {x}")
         axes[2, i].axis("off")
 
@@ -335,24 +368,28 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False):
     if pca_rgb:
         try:
             from sklearn.decomposition import PCA
-            mid_z = D // 3
-            flat = arr[mid_z].reshape(-1, C).astype(np.float32)
-            pca = PCA(n_components=3).fit_transform(flat)
-            rgb = (pca - pca.min(0)) / (pca.ptp(0) + 1e-7)
-            rgb = rgb.reshape(H, W, 3)
-            plt.figure(figsize=(6, 6))
-            plt.title("Mid‑Z PCA‑RGB")
-            plt.imshow(rgb)
-            # plt.axis("off")
+            mid_z = D // 2
+            mid = get_mid_slice_for_pca(mid_z)   # (H, W, C)
+            Hm, Wm, Cm = mid.shape
+            if Cm < 3:
+                print(f"PCA-RGB needs >=3 channels, but got C={Cm}. Skipping.")
+            else:
+                flat = mid.reshape(-1, Cm).astype(np.float32)
+                pca = PCA(n_components=3).fit_transform(flat)
+                rgb = (pca - pca.min(0)) / (pca.ptp(0) + 1e-7)
+                rgb = rgb.reshape(Hm, Wm, 3)
+                plt.figure(figsize=(6, 6))
+                plt.title("Mid-Z PCA-RGB")
+                plt.imshow(rgb)
+                # plt.axis("off")
         except ImportError:
-            print("Install scikit‑learn for PCA‑RGB view → `pip install scikit‑learn`.\n")
+            print("Install scikit-learn for PCA-RGB view → `pip install scikit-learn`.\n")
     plt.show()
 
-
 #%%
-save_zarr_path = f"/home/confetti/e5_data/rm009/feats_l2_avg8_z13750_z17499C4.zarr"
+save_zarr_path = f"/home/confetti/data/t1779/test_feat3_l3_avg8_rhemisphere.zarr"
 summarise_zarr(save_zarr_path)
-plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True)
+plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=-1)
 #%%
 img_coord = (120,3499,5250)  # arbitrary voxel in raw image space
 feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(8,8,8))

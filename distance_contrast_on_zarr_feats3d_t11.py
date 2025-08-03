@@ -195,7 +195,7 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"l3_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
+    exp_name = f"l2_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
     run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)

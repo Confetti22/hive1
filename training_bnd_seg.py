@@ -2,6 +2,8 @@
 import itertools                      
 from typing import Sequence, Union
 from pathlib import Path
+from matplotlib import cm
+from PIL import Image
 import time, zarr, math, os
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
@@ -56,6 +58,19 @@ def register_hooks(model, prefix=""):
             HOOK_HANDLES.append(m.register_forward_hook(partial(_hook, full_name)))
         else:
             register_hooks(m, f"{full_name}.")
+def print_load_result(load_result):
+    missing = load_result.missing_keys
+    unexpected = load_result.unexpected_keys
+
+    if not missing and not unexpected:
+        print("✅ All weights loaded successfully.")
+    else:
+        print("⚠️ Some weights were not loaded exactly:")
+        if missing:
+            print(f"   • Missing keys ({len(missing)}):\n     {missing}")
+        if unexpected:
+            print(f"   • Unexpected keys ({len(unexpected)}):\n     {unexpected}")
+
 
 
 
@@ -65,37 +80,31 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
         seg_head.eval()
 
     valid_loss, gt_maskes, pred_maskes = [], [], []
-    total_top1 = []
 
     with torch.no_grad():
-        for inputs, masks ,bnd_labels in tqdm(valid_loader):
-            inputs, masks,bnd_labels = inputs.to(device), masks.to(device),bnd_labels.to(device)
-            valid_mask = masks >= 0
-            bnd_labels =bnd_labels[:, None, :, :, None]            # (4, 1, 249, 249, 1) 
-            valid_mask =valid_mask[:, None, :, :, None]            # (4, 1, 249, 249, 1) 
+        for inputs, masks ,targets in tqdm(valid_loader):
+            inputs, masks,targets = inputs.to(device), masks.to(device),targets.to(device)
+            masks = masks.unsqueeze(1).unsqueeze(1)
+            targets= targets.unsqueeze(1).unsqueeze(1)
 
             optimizer.zero_grad()
             logits = cmpsd_model(inputs)          # NEW
             if seg_head:
                 logits = seg_head(logits)          # NEW
-            logits_flat = logits.permute(0, 2, 3, 4, 1)[valid_mask]
-            bnd_labels_flat = bnd_labels[valid_mask]
 
-            loss = loss_fn(logits_flat,bnd_labels_flat)
-
+            loss = loss_fn(logits,targets,masks)
             valid_loss.append(loss.item())
 
-            top1 = accuracy(logits_flat, bnd_labels_flat)
-            total_top1.append(top1)
 
             probs  = torch.sigmoid(logits)
             pred  = (probs >= 0.5).long()
             
+            valid_mask = masks.permute(0, 2, 3, 4, 1)            # (4, 1, 249, 249, 1) 
             pred = pred.permute(0, 2, 3, 4, 1) 
             pred  = pred * valid_mask
 
             pred_np  = pred.cpu().squeeze().numpy()
-            bnd_label_np = (bnd_labels).cpu().squeeze().numpy()
+            bnd_label_np = (targets).cpu().squeeze().numpy()
 
             gt_maskes.append(bnd_label_np)
             pred_maskes.append(pred_np)
@@ -105,34 +114,43 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
     gt_maskes = np.concatenate([ arr for arr in gt_maskes], axis=0)
     pred_maskes= np.concatenate([ arr for arr in pred_maskes], axis=0)
 
-    num_classes = 3                       # your label count
     # cmap        = plt.get_cmap('nipy_spectral', num_classes)
-    cmap = ListedColormap([
-    (0, 0, 0, 0),   # label 0 – fully transparent (or pick another color)
-    (1, 0, 0, 0),   # label 1 – red
-    (0, 0, 1, 0)    # label 2 – blue
-    ])
+    cmap = [
+        [0,0,0],
+        [0,1,1],
+        [1,0,1],
+        [1,1,1]
+    ]
     max_cols    = 4                       # ≤ 4 columns in the gallery
 
     # --- 1) merge GT + prediction for visualisation ----------------------------
     combined_imgs = []
     for idx ,(gt, pred) in enumerate(zip(gt_maskes, pred_maskes)):
         # Put GT on the left, prediction on the right
-        merged = gt.copy()
-        merged[pred>0] = 2 
+        merged = np.zeros((gt.shape[0],gt.shape[1],3),dtype=np.float32)
+        code = (gt.astype(np.uint8) << 1) + pred.astype(np.uint8)
+        merged[code ==0]=cmap[0]
+        merged[code ==1]=cmap[1]
+        merged[code ==2]=cmap[2]
+        merged[code ==3]=cmap[3]
+
         valid_save_dir = img_logger.images_dir
-        tif.imwrite(f"{valid_save_dir}/{idx}_{epoch}.tif",merged)
-        combined = np.hstack((gt,merged))
+        rgb_uint8 = (merged*255).astype(np.uint8)
+        img = Image.fromarray(rgb_uint8)
+        img.save(f"{valid_save_dir}/{idx}_{epoch}.tiff",format='TIFF')
+        
+        rgb_gt = np.stack([gt] * 3, axis=-1)
+        combined = np.hstack((rgb_gt,merged))
         combined_imgs.append(combined)
     # --- 2) build a grid -------------------------------------------------------
     n_imgs  = len(combined_imgs)
     n_cols  = min(max_cols, n_imgs)
     n_rows  = math.ceil(n_imgs / n_cols)
-    h, w = combined_imgs[0].shape        # (H, W) of a single mask
+    h, w,c = combined_imgs[0].shape        # (H, W) of a single mask
 
-    dpi      = 57                       # logical pixels per inch
-    fig_w_in = (w * n_cols) / dpi        # make sure W *cols  ≥ fig_w * dpi
-    fig_h_in = (h * n_rows) / dpi        #               same for H
+    dpi      = 100                       # logical pixels per inch
+    fig_w_in = (2*w * n_cols) / dpi        # make sure W *cols  ≥ fig_w * dpi
+    fig_h_in = (2*h * n_rows) / dpi        #               same for H
 
     fig, axes = plt.subplots(
         n_rows, n_cols,
@@ -143,7 +161,7 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
 
     for idx, img in enumerate(combined_imgs):
         r, c = divmod(idx, n_cols)
-        axes[r, c].imshow(img, cmap=cmap, vmin=1, vmax=num_classes)
+        axes[r, c].imshow(img )
         axes[r, c].set_title(f"Sample {idx}", fontsize=10)
         axes[r, c].axis("off")
 
@@ -151,28 +169,28 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
     for idx in range(n_imgs, n_rows * n_cols):
         r, c = divmod(idx, n_cols)
         axes[r, c].axis("off")
-
     fig.tight_layout()
 
     img_logger.add_figure('gt/pred',fig,global_step = epoch)
+
     cmpsd_model.train()
     if seg_head:
         seg_head.train()
 
     avg_valid_loss = sum(valid_loss)/len(valid_loss)
-    avg_top1 = sum(total_top1)/len(total_top1)
 
-    return avg_valid_loss, avg_top1
+    return avg_valid_loss
+
 
 #%%
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 cfg_path = 'config/seghead.yaml'
 args = load_cfg(cfg_path)
-args.e5 = True
+args.e5 =False 
 data_prefix   = Path("/share/home/shiqiz/data" if args.e5 else "/home/confetti/data")
 
 exp_save_dir   = 'outs/seg_bnd'
-exp_name       = f"bnd_seg_scratch_3moduler_level{args.feats_level}_avg_pool{args.feats_avg_kernel}"
+exp_name       = f"bnd_seg_finetune_scratch_3moduler_level{args.feats_level}_avg_pool{args.feats_avg_kernel}_cldice_smallerlr"
 # exp_name       = f"bnd_seg_on_stractch"
 model_save_dir = f"{exp_save_dir}/{exp_name}"
 os.makedirs(model_save_dir, exist_ok=True)
@@ -202,7 +220,15 @@ args.feats_level = len(args.filters)
 args.feats_avg_kernel = 8
 
 cmpsd_model = build_final_model(args).to(device)
+seg_scratch_pth = "/home/confetti/e5_workspace/hive1/outs/seg_bnd/bnd_seg_finetune_scratch_3moduler_level2_avg_pool8_cldice_smallerlr/model_epoch_150.pth"
+ckpt = torch.load(seg_scratch_pth)
+load_result = cmpsd_model.load_state_dict(ckpt['cmpsd_model'])
+print_load_result(load_result)
 
+C=12
+seg_head     = ConvSegHead(C, 1).to(device)
+load_result = seg_head.load_state_dict(ckpt['seg_head'])
+print_load_result(load_result)
 cnn_ckpt_path = data_prefix / "weights" / "rm009_3d_ae_best.pth"
 mlp_ckpt_pth = "outs/contrastive_run_rm009/rm009_v1/l2_avg8_roi_postopk_numparis16384_batch4096_nview4_d_near6_shuffle20_csine_anllr/checkpoints/epoch_8300.pth" 
 
@@ -215,11 +241,11 @@ mlp_ckpt_pth = "outs/contrastive_run_rm009/rm009_v1/l2_avg8_roi_postopk_numparis
 # cmpsd_model.mlp_encoder.requires_grad_(False)   # no grads
 # cmpsd_model.mlp_encoder.eval()                  # BN/Dropout → inference
 # verify it's really frozen
-n_frozen = sum(p.numel() for p in cmpsd_model.cnn_encoder.parameters())
-print(f"[info] frozen cnn_encoder params: {n_frozen:,}")
+n_learnable = sum(p.numel() for p in cmpsd_model.cnn_encoder.parameters())
+print(f"[info] learnable cnn_encoder params: {n_learnable:,}")
+n_learnable = sum(p.numel() for p in cmpsd_model.mlp_encoder.parameters())
+print(f"[info] learnable mlp params: {n_learnable:,}")
 
-C=12
-seg_head     = ConvSegHead(C, 1).to(device)
 
 register_hooks(cmpsd_model.mlp_encoder, "mlp.")  # you can add cnn if needed
 print("Registered layers:", LAYER_ORDER)
@@ -230,8 +256,8 @@ summary(cmpsd_model, (1, *args.input_size))
 cmpsd_model.train()
 seg_head.train()
 
-args.lr_start = 1e-4
-args.lr_end = 1e-5
+args.lr_start = 1e-5
+# args.lr_end = 1e-5
 warmup_epochs = 10
 max_epochs = args.num_epochs
 
@@ -248,68 +274,46 @@ scheduler= torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
 
 # %% ---------- data loaders & loggers (unchanged) -----------------------------
 
-dataset        = get_dataset(args,bnd=True)
-loader         = DataLoader(dataset, batch_size=6, shuffle=True, drop_last=False)
-valid_dataset  = get_valid_dataset(args,bnd=True)
-valid_loader   = DataLoader(valid_dataset, batch_size=6, shuffle=False, drop_last=False)
+dataset        = get_dataset(args,bnd=True,bool_mask=True)
+loader         = DataLoader(dataset, batch_size=4, shuffle=True, drop_last=False)
+valid_dataset  = get_valid_dataset(args,bnd=True,bool_mask=True)
+valid_loader   = DataLoader(valid_dataset, batch_size=4, shuffle=False, drop_last=False)
 
-from train_seghead_helper import ComboLoss,compute_class_weights_from_dataset
-from lib.loss.l1 import WeightedL1Loss
+from lib.loss.cldice import get_loss
 
-class_weights = compute_class_weights_from_dataset(dataset, num_classes=2)
-# class_weights[0]=0.1
-# class_weights[1]=0.9
-loss_fn = WeightedL1Loss(class_weights.to(device),reduction='mean', logits=True) 
-# loss_fn= ComboLoss(weight_ce=1.0,
-#                       weight_dice=1.0,
-#                       smooth=1e-6,
-#                       class_weights= 20,   # pos_weight (or α) if desired
-#                       focal=True,
-#                       binary=True)
-
-
+loss_fn = get_loss()
+start_epoch = 150
 # %% ---------- training loop --------------------------------------------------
-for epoch in tqdm(range(args.num_epochs)):
+for epoch in tqdm(range(start_epoch,args.num_epochs)):
     train_loss = []
     total_top1 = []
-    for inputs, masks,bnd_labels in loader:
-        inputs, masks,bnd_labels = inputs.to(device), masks.to(device),bnd_labels.to(device)
-        valid_mask = masks >= 0
-        bnd_labels =bnd_labels[:, None, :, :, None]            # (4, 1, 249, 249, 1) 
-        valid_mask =valid_mask[:, None, :, :, None]            # (4, 1, 249, 249, 1) 
-
+    for inputs, masks,targets in loader:
+        inputs, masks,targets = inputs.to(device), masks.to(device),targets.to(device)
         optimizer.zero_grad()
         logits = cmpsd_model(inputs)          # NEW
-        logits = seg_head(logits)              # CHANGED
-        
-        logits_flat = logits.permute(0, 2, 3, 4, 1)[valid_mask]
-        bnd_labels_flat = bnd_labels[valid_mask]
+        logits = seg_head(logits)  
 
-        loss = loss_fn(logits_flat,bnd_labels_flat)
+        masks = masks.unsqueeze(1).unsqueeze(1)
+        targets= targets.unsqueeze(1).unsqueeze(1)
+
+        loss = loss_fn(logits,targets,masks)
         loss.backward()
         optimizer.step()
         scheduler.step()
 
         train_loss.append(loss.item())
 
-        top1= accuracy(logits_flat, bnd_labels_flat)
-        total_top1.append(top1)
-
         FEATURE_STORE.clear()   # free memory
 
     avg_loss = sum(train_loss) / len(train_loss)
-    avg_top1 = sum(total_top1)/len(total_top1)
     current_lr = scheduler.get_last_lr()[0]
     writer.add_scalar('lr',scheduler.get_last_lr()[0] , epoch)
     writer.add_scalar('Loss/train', avg_loss, epoch)
-    writer.add_scalar("top1_acc/train", avg_top1, epoch)
     print(f"Epoch {epoch:02d} | loss={loss:.4f} | lr={current_lr:.6f}")
     
     if epoch % args.valid_very_epoch == 0:
-        v_loss,avg_top1= bnd_seg_valid(img_logger, valid_loader, cmpsd_model, epoch=epoch ,valid_first_batch=True,seg_head=seg_head)
+        v_loss= bnd_seg_valid(img_logger, valid_loader, cmpsd_model, epoch=epoch ,valid_first_batch=True,seg_head=seg_head)
         writer.add_scalar('Loss/valid', v_loss, epoch)
-        writer.add_scalar("top1_acc/valid", avg_top1, epoch)
-    
 
     if (epoch % (4 * args.valid_very_epoch)) == 0:
         bnd_seg_valid(train_img_logger, loader, cmpsd_model,  epoch,valid_first_batch=True,seg_head=seg_head)

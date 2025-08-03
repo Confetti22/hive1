@@ -19,7 +19,7 @@ import numpy as np
 from typing import Tuple
 
 class SegDataset(Dataset):
-    def __init__(self, args,valid=False,use_ratio = 1,bnd=False):
+    def __init__(self, args,valid=False,use_ratio = 1,bnd=False,bool_mask=False):
         """
         for 3d feats volume and corresponding mask
         amount : control the amount of data for training
@@ -41,6 +41,7 @@ class SegDataset(Dataset):
         current_mask_path = self.valid_mask_path if self.valid else self.mask_path
 
         self.bnd =bnd
+        self.bool_mask = bool_mask
         if bnd:
             self.bnd_path = args.e5_bnd_path_dir if self.e5 else args.bnd_path_dir
             self.valid_bnd_path = args.e5_valid_bnd_path_dir if self.e5 else args.valid_bnd_path_dir
@@ -60,7 +61,7 @@ class SegDataset(Dataset):
         self.masks_files = sorted(
             [os.path.join(current_mask_path, fname) 
             for fname in os.listdir(current_mask_path) 
-            if fname.endswith('.tiff')],
+            if fname.endswith('.tif')],
             key=lambda x: int(os.path.basename(x)[:4])
         )
 
@@ -113,14 +114,14 @@ class SegDataset(Dataset):
 
 
 
-    def _load_vol(self,path: str, *, to_long: bool) -> torch.Tensor:
+    def _load_vol(self,path: str,) -> torch.Tensor:
+
         """Read, down-sample, crop, return a torch tensor."""
         arr = tif.imread(path)                              # np.ndarray
         arr = np.squeeze(arr)
         arr = zoom(arr, self._down, order=0)                # nearest-neighbour
         arr = self.crop_border(arr, self._crop, self._even)      # keeps depth if 1
-        dtype = torch.long if to_long else torch.uint8
-        return torch.as_tensor(arr, dtype=dtype)            # (D,H,W) or (H,W)
+        return torch.as_tensor(arr, dtype=torch.float32)            # (D,H,W) or (H,W)
 
     def __len__(self):
         return len(self.files) 
@@ -145,27 +146,30 @@ class SegDataset(Dataset):
         self._crop   = (self.feats_avg_kernel - 1) // 2
         self._even   = (self.feats_avg_kernel % 2 == 0)
 
-        mask = self._load_vol(self.mask_files[idx], to_long=True)    # labels
-        mask = mask -1 # class number rearrange from 0 to N-1
+        mask = self._load_vol(self.mask_files[idx])    # labels
+        if self.bool_mask:
+            mask = mask
+        else: # for numerical mask
+            mask = mask -1 # class number rearrange from 0 to N-1
 
         if self.bnd:
-            bnd  = self._load_vol(self.bnd_files[idx],  to_long=False)   # binary boundary
+            bnd  = self._load_vol(self.bnd_files[idx])   # binary boundary
             return feats,mask,bnd
         else:
             return feats,mask
 
 
-def get_dataset(args,bnd=False):
+def get_dataset(args,bnd=False,bool_mask=False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args, use_ratio=1,bnd=bnd)
+    train_dataset = SegDataset(args, use_ratio=1,bnd=bnd,bool_mask=bool_mask)
 
     return train_dataset
 
-def get_valid_dataset(args,bnd=False):
+def get_valid_dataset(args,bnd=False,bool_mask = False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args,valid=True,use_ratio =1,bnd=bnd)
+    train_dataset = SegDataset(args,valid=True,use_ratio =1,bnd=bnd,bool_mask=bool_mask)
 
     return train_dataset
 
