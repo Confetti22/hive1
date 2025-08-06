@@ -1,5 +1,5 @@
-exp_name : "test_rm009" #exp_name used to distinguish each run
-out: "rm009_ae_out" #path to output directory
+exp_name : "train_ae_on_rm009_right_v1_roi1_warmup_decay2" #exp_name used to distinguish each run
+out: "outs/ae_out" #path to output directory
 
 # system:
 device: cuda
@@ -14,15 +14,15 @@ dims : 3
 model_name: ae3
 architecture: ae
 block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
-filters: [32,64]  # filters number can not be the same consecutively
-kernel_size: [5,5]
+filters: [32,64,96]  # filters number can not be the same consecutively
+kernel_size: [5,5,3]
 in_planes: 1
 out_planes: 1 
 pad_mode: 'reflect'
 act_mode: 'elu'
 norm_mode: 'none'
 #_______for mlp_encoder_____
-mlp_filters: [64,32,24,12]
+mlp_filters: [96,48,24,12]
 avg_pool_size: [8,8,8] 
 avg_pool_padding: False
 last_encoder: False
@@ -33,12 +33,13 @@ loss_name: l1 # for ae reconstruction loss
 # trainer:
 trainer_name: 'trainer' #trainer to choose
 save_every: 50 #save frequency
-epoch: 1500
+epoch: 1000
 fp16: false 
 
 # solver:
 optimizer: "adam"
-lr_scheduler_name: "cosine"
+# lr_scheduler_name: "cosine"
+lr_scheduler_name: "decay"
 lr_start: 5e-4
 lr_end: 5e-6
 weight_decay: 0.01
@@ -47,14 +48,14 @@ lr_warmup: 10
 # dataset:
 e5: True 
 dataset_name: 'simple_dataset'
-batch_per_gpu: 256 
+batch_per_gpu: 512 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/data/rm009/roi_whole_brain4"
-valid_data_path_dir: "/home/confetti/data/rm009/valid_roi"
+data_path_dir: "/home/confetti/data/rm009/roi_v1roi1_brain4ae_nissl"
+valid_data_path_dir: "/home/confetti/data/rm009/roi_v1roi1_brain4ae_nissl_valid"
 
-e5_data_path_dir: "/share/home/shiqiz/data/rm009/roi_whole_brain4"
-e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/valid_roi" 
+e5_data_path_dir: "/share/home/shiqiz/data/rm009/roi_v1roi1_brain4ae_nissl"
+e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/roi_v1roi1_brain4ae_nissl_valid" 
 
 
 #for mlp contrastive_learning

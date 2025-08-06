@@ -170,7 +170,7 @@ class EncoderND(nn.Module):
             x = self.last_encoder_conv(x)
 
         avg_pool_size = self.avg_pool_size
-        apply_avg_flag = avg_pool_size[0]
+        apply_avg_flag = self.avg_pool_size if (self.avg_pool_size is None) else avg_pool_size[0]
         if apply_avg_flag:
             
             if self.avg_pool_padding:
@@ -438,9 +438,9 @@ def load_mlpencoder_dict(model,ckpt_pth):
     unexpected = load_result.unexpected_keys
 
     if not missing and not unexpected:
-        print("✅ All weights loaded successfully.")
+        print("load_mlpencoder_dict ✅ All weights loaded successfully.")
     else:
-        print("⚠️ Some weights were not loaded exactly:")
+        print("load_mlpencoder_dict ⚠️ Some weights were not loaded exactly:")
         if missing:
             print(f"   • Missing keys ({len(missing)}):\n     {missing}")
         if unexpected:
@@ -477,7 +477,7 @@ def load_mlp_ckpt_to_convmlp(convmlp_model, mlp_ckpt_pth=None, mlp_weight_dict=N
             raise ValueError(f'Unknown param name {name}')
 
     convmlp_model.load_state_dict(new_state_dict)
-    print(f"✅all weiths loaded into convmlp successfully")
+    print(f"load_mlp_ckpt_to_convmlp ✅all weiths loaded into convmlp successfully")
 
 def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth=None,mlp_weight_dict=None,dims=2):
     cnn = cmodel.cnn_encoder

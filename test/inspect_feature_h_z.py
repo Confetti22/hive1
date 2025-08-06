@@ -24,7 +24,7 @@ from scipy.ndimage import zoom
 
 from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
-    get_rm009_eval_data,
+    get_t11_eval_data,
     valid_from_roi,
     MLP,
     load_checkpoint,
@@ -221,7 +221,7 @@ cfg = load_cfg("config/rm009.yaml")
 writer = SummaryWriter(log_dir="outs/eval_mlp_layers")
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eval_data = get_rm009_eval_data(E5=cfg.e5,img_no_list=[1])
+eval_data = get_t11_eval_data(E5=cfg.e5,img_no_list=[1])
 data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
 
 

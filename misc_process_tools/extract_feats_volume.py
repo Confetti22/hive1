@@ -253,13 +253,12 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("config/t11_3d.yaml")
+cfg = load_cfg("config/rm009.yaml")
 avg_pool = 8 
 cfg.avg_pool_size = [avg_pool] * 3
-cfg.last_encoder = True 
-# cfg.filters = [32,64]
-# cfg.kernel_size = [5,5]
-# %%
+cfg.last_encoder = False 
+cfg.filters = [32,64]
+cfg.kernel_size = [5,5]
 
 #%%
 E5 =False
@@ -271,34 +270,36 @@ else:
     workspace_prefix = '/home/confetti/e5_workspace/hive1'
 
 
+sample_name = 'rm009'
 model = build_encoder_model(cfg, dims=3)
-load_encoder2encoder(model, f"{data_prefix}/weights/t11_3d_ae_best2.pth")
-vol_path = "/home/confetti/e5_data/t1779/t1779.ims" 
+load_encoder2encoder(model, f"{data_prefix}/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth")
+vol_path = f"/home/confetti/e5_data/{sample_name}/rm009.ims" 
 # vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
-save_zarr_path = f"{data_prefix}/t1779/test_ae_feats_nissel_l3_avg8_rhemisphere.zarr"
+save_zarr_path = f"{data_prefix}/{sample_name}/feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
 
 #%%
 extract_features_to_zarr(
     vol_path= vol_path,
-    channel=2,
+    channel=1,
     model=model,
     zarr_path=save_zarr_path,
-    # global_offset=(3392,2000,7008),
-    global_offset=(6400,2000,7008),
-    # whole_volume_size=(6784,5024,4200),
-    whole_volume_size=(64,5024,4200),
-    region_size=(64, 1536, 1536),
-    roi_size=(64,64,64),
-    roi_stride=(16,16,16),
-    batch_size= 1024,
+    global_offset=(13750,3500,9250),
+    whole_volume_size=(3750,3500,5250),
+    region_size=(64, 1024,1024),
+    roi_size=(32,32,32),
+    roi_stride=(8,8,8),
+    batch_size= 4096,
     device="cuda",
-    # layer_path="down_layers.0",  # pick *one* internal layer
-    # pool_size=8,                 # or None / 1 for “no pooling”
+    layer_path="down_layers.0",  # pick *one* internal layer
+    pool_size=8,                 # or None / 1 for “no pooling”
 )
 
 
 #%%
 import matplotlib.pyplot as plt
+from pathlib import Path
+import zarr
+import numpy as np
 # -----------------------------------------------------------------------------
 #                       q u i c k   v a l i d a t i o n   u t i l s
 # -----------------------------------------------------------------------------
@@ -387,7 +388,6 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False, cha
     plt.show()
 
 #%%
-save_zarr_path = f"/home/confetti/data/t1779/test_feat3_l3_avg8_rhemisphere.zarr"
 summarise_zarr(save_zarr_path)
 plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=-1)
 #%%

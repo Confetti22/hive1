@@ -14,7 +14,7 @@ act_mode: 'elu'
 norm_mode: 'none'
 #_______for mlp_encoder_____
 mlp_filters: [96,48,24,12]
-last_encoder: False
+last_encoder: True 
 
 #____for region_feature_extract___, is applied after cnn_encoder
 avg_pool_size: [8,8,8] 
@@ -22,11 +22,23 @@ avg_pool_padding: False
 
 
 # dataset:
-e5: False 
+e5: True 
 dataset_name: 'knn_dataset'
 batch_per_gpu: 256 
 num_workers: 0
 shuffle: true
-data_path_dir: "/home/confetti/data/t1779/knn"
 
-e5_data_path_dir: "/share/home/shiqiz/data/t1779/knn"
+#for mlp contrastive_learning
+num_epochs: 10000
+num_pairs: 16384 
+start_epoch: 0
+batch_size: 4096 
+shuffle_very_epoch: 20 
+valid_very_epoch: 50
+save_very_epoch: 50
+n_views: 4 
+pos_weight_ratio: 2
+# raw_img_resol:1um  feats_map_resol:16stride --> 16 um resol in feats_map
+d_near: 8 
+loss_enhance: True 
+re_use: False 

@@ -32,7 +32,7 @@ class SimpleDataset(Dataset):
         self.files = sorted(
                             [os.path.join(current_path, fname) 
                             for fname in os.listdir(current_path) 
-                            if fname.endswith('.tiff')],
+                            if fname.endswith(('.tif', '.tiff'))],
                             key=lambda x: int(os.path.basename(x)[:4])
                         )
         # random.shuffle(self.files)
@@ -68,7 +68,7 @@ def get_dataset(args):
 def get_valid_dataset(args):
 
     # === Get Dataset === #
-    train_dataset = SimpleDataset(args,valid=True,use_ratio =0.2)
+    train_dataset = SimpleDataset(args,valid=True,use_ratio=1)
 
     return train_dataset
 

@@ -42,18 +42,18 @@ def train(args):
     model = nn.Linear(args.in_dim, args.out_dim).to(device)
     opt = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)  # max LR
-    sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=20,     # length of the first cycle (epochs or steps—your call)
-        T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
-        eta_min=1e-4,  # minimum LR at the valley of each cosine
-    )
-    # sched = WarmupCosineLR(
-    #     opt,
-    #     warmup_epochs=args.warmup_epochs,
-    #     max_epochs=args.epochs,
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)  # max LR
+    # sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    #     optimizer,
+    #     T_0=20,     # length of the first cycle (epochs or steps—your call)
+    #     T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
+    #     eta_min=1e-4,  # minimum LR at the valley of each cosine
     # )
+    sched = WarmupCosineLR(
+        opt,
+        warmup_epochs=args.warmup_epochs,
+        max_epochs=args.epochs,
+    )
 
     save_dir = f"{args.logdir}/tooth2"
     os.makedirs(save_dir,exist_ok=True)

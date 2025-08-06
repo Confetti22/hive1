@@ -32,7 +32,7 @@ import zarr
 from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
     cos_loss_topk,
-    get_rm009_eval_data,
+    get_t11_eval_data,
     MLP,
     Contrastive_dataset_3d,
     load_checkpoint,
@@ -40,7 +40,6 @@ from helper.contrastive_train_helper import (
     log_layer_embeddings,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
-from lib.core.scheduler import WarmupCosineLR
 
 # =============================================================================
 # Utility helpers
@@ -48,8 +47,8 @@ from lib.core.scheduler import WarmupCosineLR
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Contrastive 3-D feature training")
-    p.add_argument("--cfg", type=str, default='config/rm009.yaml', help="Path to YAML config")
-    p.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume")
+    p.add_argument("--cfg", type=str, default='config/t11_3d.yaml', help="Path to YAML config")
+    p.add_argument("--ckpt", type=str, default=None, help="outs/contrastive_run_t1779/on_rhems_postopk_numparis16384_batch2048_nview4_d_near8_shuffle20_csine_anllr/checkpoints/epoch_8250.pth")
     p.add_argument("--device", type=str, default="cuda", help="cuda | cpu | cuda:0 …")
     return p.parse_args()
 
@@ -129,6 +128,7 @@ def valid_from_roi(model, epoch, eval_data, writer):
             mode="both",                   # <- t-SNE + UMAP stacked
             tsne_kwargs=dict(perplexity=20),
             umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
+            valid_img_id =idx,
         )
         
 
@@ -193,10 +193,12 @@ def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    sample_name ='t1779'
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"l2_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
-    run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
+    exp_name = f"on_rhems_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
+    # run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
+    run_dir = Path("outs") /f'contrastive_run_{sample_name}'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,16 +206,16 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "feats_l2_avg8_z13750_z17499C4.zarr"
-    feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
+    feats_name = "ae_feats_nissel_l3_avg8_rhemisphere.zarr"
+    feats_map = zarr.open_array(str(data_prefix / sample_name / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
     feats_map = feats_map[:]
 
-    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False,hy=437,hx=656)
+    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
     loader = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, pin_memory=True)
 
     # ---------------- models ----------------------- #
-    level_key = 'l2'
+    level_key = 'l3'
     filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,64,32,12]}
     cfg.mlp_filters = filters_map[level_key]
 
@@ -227,26 +229,32 @@ def main():
     print("Registered layers:", LAYER_ORDER)
 
     # --------------- optim & sched ----------------- #
-    optimizer = optim.Adam(model.parameters(), lr=2e-4)
+    opt = optim.Adam(model.parameters(), lr=2e-4)
+    warmup_epochs= 20
 
-    scheduler= torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=50,     # length of the first cycle (epochs or steps—your call)
-        T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        opt, start_factor=1e-8, end_factor=1.0, total_iters=warmup_epochs
     )
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt, T_max=cfg.num_epochs  - warmup_epochs, eta_min=0.0
+    )
+    sched = torch.optim.lr_scheduler.SequentialLR(
+        opt, schedulers=[warmup, cosine], milestones=[warmup_epochs]
+    )
+
 
     # --------------- resume logic ------------------ #
     start_epoch = 0
     if args.ckpt:
-        start_epoch = load_checkpoint(args.ckpt, model, optimizer)
+        start_epoch = load_checkpoint(args.ckpt, model, opt)
         print(f"[INFO] Resumed from {args.ckpt} (next epoch = {start_epoch})")
 
     # ---------------- logging ---------------------- #
     writer = SummaryWriter(log_dir=run_dir / "tb")
 
     # ---------------- validation data -------------- #
-    eval_data = get_rm009_eval_data(E5=cfg.e5,img_no_list=[1])
-    cnn_ckpt = data_prefix / "weights" / "rm009_3d_ae_best.pth"
+    eval_data = get_t11_eval_data(E5=cfg.e5,img_no_list=[1,3])
+    cnn_ckpt = data_prefix / "weights" / "t11_3d_ae_best2.pth"
 
     # ---------------- training loop ---------------- #
     n_epochs = cfg.num_epochs
@@ -256,10 +264,10 @@ def main():
 
     for epoch in range(start_epoch, n_epochs):
 
-        train_one_epoch(model, loader, optimizer, device, epoch, writer,
+        train_one_epoch(model, loader, opt, device, epoch, writer,
                         n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,
                         only_pos=True)
-        scheduler.step()
+        sched.step()
         # validation
         if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs or epoch ==0:
             validate(model, cmpsd_model, eval_data, device, epoch, writer,cnn_ckpt=cnn_ckpt, dims=cfg.dims,)
@@ -272,7 +280,7 @@ def main():
         # checkpoint
         if (epoch + 1) % ckpt_every == 0 or epoch + 1 == n_epochs:
             ckpt_path = run_dir / "checkpoints" / f"epoch_{epoch + 1:03d}.pth"
-            save_checkpoint({"model": model.state_dict(), "optim": optimizer.state_dict(), "epoch": epoch}, ckpt_path)
+            save_checkpoint({"model": model.state_dict(), "optim": opt.state_dict(), "epoch": epoch}, ckpt_path)
             print(f"[INFO] Saved checkpoint → {ckpt_path}")
 
     # ---------------- finalize --------------------- #

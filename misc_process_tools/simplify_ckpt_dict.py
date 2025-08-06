@@ -12,11 +12,12 @@ output: simplified encoder weight dict
 from lib.arch.ae import modify_key,delete_key
 import torch
 
-ckpt_pth ='/home/confetti/data/weights/t11_3d_ae_best2.pth'
+ckpt_pth ='/home/confetti/data/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth'
 ckpt = torch.load(ckpt_pth)
 print(ckpt.keys())
 #%%
-removed_module_dict = modify_key(ckpt['model'],source='module.',target='')
+# removed_module_dict = modify_key(ckpt['model'],source='module.',target='')
+removed_module_dict = modify_key(ckpt['model'],source='module.encoder.',target='')
 print(removed_module_dict.keys())
 
 # %%

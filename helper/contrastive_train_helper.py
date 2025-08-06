@@ -872,6 +872,7 @@ def log_layer_embeddings(
     tsne_kwargs=None,
     umap_kwargs=None,
     dpi=300, ext='png',
+    valid_img_id = 0,
 
 ):
     """
@@ -907,21 +908,35 @@ def log_layer_embeddings(
 
         # you stored single tensor per key; if you still store list use [-1]
         out_t = FEATURE_STORE[k][-1] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
-        feat = out_t.detach().cpu().squeeze().numpy()  # assume [C,D,H,W] or [D,H,W,C]? adjust below
+        feat = out_t.detach().cpu().squeeze().numpy()  # could be [D,H,W,C], [H,W,C], [C,D,H,W], or [C,H,W]
 
-        # Reorder to [D,H,W,C] assuming channel-first
-        if feat.ndim == 4 and feat.shape[0] not in (label_volume.shape[0],):  # crude heuristic
-            # assume feat is [C,D,H,W] -> moveaxis 0->-1
-            feat = np.moveaxis(feat, 0, -1)
-        elif feat.ndim == 4 and feat.shape[-1] not in (label_volume.shape[0],):
-            # already channel-last; leave
-            pass
+        # --- Normalize to channel-last; if 4D, also standardize to [D,H,W,C] ---
+        if feat.ndim == 4:
+            # if first dim isn't depth (i.e., not equal to label D), assume [C,D,H,W] and move channel to last
+            if feat.shape[0] != label_volume.shape[0]:
+                # [C,D,H,W] -> [D,H,W,C]
+                feat = np.moveaxis(feat, 0, -1)
+            # now feat is [D,H,W,C]
+            feat2d = feat[feat.shape[0] // 2]  # mid-slice -> [H,W,C]
+
+        elif feat.ndim == 3:
+            # Either [H,W,C] (OK) or [C,H,W] (make channel-last)
+            # if feat.shape[0] not in (label_volume.shape[0],) and feat.shape[0] <= 128 and feat.shape[1] == label_volume.shape[1]:
+            if feat.shape[0] not in (label_volume.shape[0],) :
+                # heuristic: likely [C,H,W] -> [H,W,C]
+                feat = np.moveaxis(feat, 0, -1)
+            # now feat is [H,W,C]
+            feat2d = feat
         else:
             raise ValueError(f"Unexpected feature shape for {k}: {feat.shape}")
 
+        # pick label mid-slice (features are 2D now)
+        lbl2d = label_volume[label_volume.shape[0] // 2]  # [H,W]
+        lbl2d = lbl2d.astype(np.int8)
 
-        feat2d = feat[int(feat.shape[0]//2),:]            # [H,W,C]
-        lbl2d  = label_volume[int(label_volume.shape[0]//2),:]    # [H,W]
+        # if min==0, then the background is 0
+        if lbl2d.min() == 0:
+            lbl2d = lbl2d -1
 
         H, W, C = feat2d.shape
 
@@ -937,7 +952,7 @@ def log_layer_embeddings(
         fg_feats_flat = feat2d[mask]
         fg_label_flat = label_zoomed[mask]
 
-        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat)
+        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat,n_per_class=500)
         tsne_encoded_feats_lst.append(blced_feats)
         tsne_label_lst.append(blced_labels)
         plot_tag_lst.append(k)
@@ -947,7 +962,7 @@ def log_layer_embeddings(
         tsne_encoded_feats_lst,
         tsne_label_lst,
         writer,
-        tag=f"embed_grid",
+        tag=f"embed_grid{valid_img_id}",
         step=epoch,
         tag_list=plot_tag_lst,
         mode=mode,
@@ -961,7 +976,7 @@ def log_layer_embeddings(
     plot_pca_maps(
         pca_img_lst,
         writer=writer,
-        tag=f"pca",
+        tag=f"pca{valid_img_id}",
         step=epoch,
         ncols=len(pca_img_lst),
     )
@@ -1009,7 +1024,7 @@ def get_vsi_eval_data(img_no_list =[1,3,4,5]):
 
     return eval_datas 
 
-def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = True):
+def get_t11_eval_data(E5,img_no_list =[1,3,4,5],ncc_seed_point = False):
     eval_datas = []
     # === eval feats and ncc_points and labels ===#
     # Set the path prefix based on E5 flag

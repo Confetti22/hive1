@@ -15,7 +15,6 @@
 import torch
 from lib.utils.file import checkdir
 from lib.utils.tensorboard import get_writer, TBWriter
-from lib.core.scheduler import cosine_scheduler
 from lib.utils.distributed import MetricLogger
 from glob import glob
 import math
@@ -83,7 +82,7 @@ class Trainer:
             it = len(self.train_gen) * epoch + it
 
             for i, param_group in enumerate(self.optimizer.param_groups):
-                param_group["lr"] = lr_schedule[it]
+                param_group["lr"] = lr_schedule.get_last_lr()[0] 
 
             # === Inputs === #
             input_data = input_data.cuda(non_blocking=True) 
@@ -113,7 +112,7 @@ class Trainer:
             loss.backward()
             
             self.optimizer.step()
-
+            lr_schedule.step()
 
             # === Logging === #
             torch.cuda.synchronize()
@@ -226,15 +225,13 @@ class Trainer:
         # === Resume === #
         self.load_if_available()
 
-        # === Schedules === #
-        if self.args.lr_scheduler_name =='cosine':
-            lr_schedule = cosine_scheduler(
-                        base_value = self.args.lr_start * (self.args.batch_per_gpu * self.args.world_size) / 256.,
-                        final_value = self.args.lr_end,
-                        epochs = self.args.epoch,
-                        niter_per_ep = len(self.train_gen),
-                        warmup_epochs= self.args.lr_warmup,
-                        )           
+
+        from lib.core.scheduler import WarmupCosineLR
+
+        lr_schedule= WarmupCosineLR(self.optimizer,
+                            warmup_epochs=20,
+                            max_epochs=self.args.epoch)
+
 
         # === training loop === #
         for epoch in range(self.start_epoch, self.args.epoch):

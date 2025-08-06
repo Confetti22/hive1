@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/training_bnd_seg_two_moduler.py"
+SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/distance_contrast_on_zarr_feats3d_t1779.py"
 SCRIPT_NAME=$(basename "$SCRIPT_PATH" .py)
 
 sbatch --job-name="$SCRIPT_NAME" <<EOF
@@ -12,7 +12,7 @@ sbatch --job-name="$SCRIPT_NAME" <<EOF
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
 #SBATCH --partition=compute
-#SBATCH --nodelist=c001
+#SBATCH --nodelist=c002
 #SBATCH --gres=gpu:1
 
 # Load environment

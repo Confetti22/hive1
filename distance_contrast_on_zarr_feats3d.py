@@ -40,7 +40,7 @@ from helper.contrastive_train_helper import (
     log_layer_embeddings,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
-from lib.core.scheduler import WarmupCosineLR
+from lib.core.scheduler import WarmupCosineLR 
 
 # =============================================================================
 # Utility helpers
@@ -195,8 +195,8 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"l3_avg8_roi_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
-    run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
+    exp_name = f"FEATl2_avg8_LOSSpostopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_cosdecay"
+    run_dir = Path("outs") /'contrastive_run_rm009'/'ae_mlp_rm009_v1'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,7 +204,7 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "feats_l2_avg8_z13750_z17499C4.zarr"
+    feats_name = "feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
     feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
     feats_map = feats_map[:]
@@ -215,6 +215,10 @@ def main():
     # ---------------- models ----------------------- #
     level_key = 'l2'
     filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,64,32,12]}
+    cnn_filters_map ={'l1':[32],'l2':[32,64],'l3':[32,64,96]}
+    cnn_kernler_size_map ={'l1':[5],'l2':[5,5],'l3':[5,5,3]}
+    cfg.filters = cnn_filters_map[level_key] 
+    cfg.kernel_size =cnn_kernler_size_map[level_key]
     cfg.mlp_filters = filters_map[level_key]
 
     model = MLP(cfg.mlp_filters).to(device)
@@ -229,11 +233,9 @@ def main():
     # --------------- optim & sched ----------------- #
     optimizer = optim.Adam(model.parameters(), lr=2e-4)
 
-    scheduler= torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=50,     # length of the first cycle (epochs or steps—your call)
-        T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
-    )
+    scheduler = WarmupCosineLR(optimizer,
+                           warmup_epochs= 40,
+                           max_epochs=cfg.num_epochs)
 
     # --------------- resume logic ------------------ #
     start_epoch = 0

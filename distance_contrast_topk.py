@@ -10,7 +10,7 @@ from torch.utils.data import Dataset,DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch
 from distance_contrast_helper import simple_eval, HTMLFigureLogger
-from helper.contrastive_train_helper import cos_loss,cos_loss_topk,valid_from_roi,get_rm009_eval_data, MLP,Contrastive_dataset_3d
+from helper.contrastive_train_helper import cos_loss,cos_loss_topk,valid_from_roi,get_t11_eval_data, MLP,Contrastive_dataset_3d
 from config.load_config import load_cfg
 from lib.arch.ae import build_final_model,load_compose_encoder_dict
 import time

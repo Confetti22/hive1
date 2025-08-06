@@ -31,8 +31,9 @@ def load_channel_stack(dir,channel: str):
 # Build stacks for all channels
 if __name__ == '__main__':
 
-    # directory = Path("/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/RM009_all_/ROIImage/4.0")
-    directory = Path("/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Mouse_Brain/20210131_ZSS_USTC_THY1-YFP_1779_1/Reconstruction_1.0/Reconstruction/BrainImage/1.0")
+    directory = Path("/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/RM009_all_/ROIImage/4.0")
+    # directory = Path("/home/confetti/data/rm009/rm009_roi/4")
+    # directory = Path("/home/confetti/mnt/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Mouse_Brain/20210131_ZSS_USTC_THY1-YFP_1779_1/Reconstruction_1.0/Reconstruction/BrainImage/1.0")
     available_channels = get_available_channels(directory)
     print(f"Found channels: {available_channels}")
 

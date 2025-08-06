@@ -4,5 +4,5 @@ python train_autoencoder.py  \
                         -slurm \
                         -slurm_ngpus 1 \
                         -slurm_nnodes 1 \
-                        -slurm_nodelist c002 \
-                        -slurm_partition compute \
+                        -slurm_nodelist t002\
+                        -slurm_partition tao\
