@@ -190,7 +190,7 @@ args.e5 =False
 data_prefix   = Path("/share/home/shiqiz/data" if args.e5 else "/home/confetti/data")
 
 exp_save_dir   = 'outs/seg_bnd'
-exp_name       = f"bnd_seg_finetune_scratch_3moduler_level{args.feats_level}_avg_pool{args.feats_avg_kernel}_cldice_smallerlr"
+exp_name       = f"_bnd_seg_3moduler_on_mlp_feats_continue_{args.feats_level}_avg_pool{args.feats_avg_kernel}_cldice_smallerlr"
 # exp_name       = f"bnd_seg_on_stractch"
 model_save_dir = f"{exp_save_dir}/{exp_name}"
 os.makedirs(model_save_dir, exist_ok=True)
@@ -220,40 +220,40 @@ args.feats_level = len(args.filters)
 args.feats_avg_kernel = 8
 
 cmpsd_model = build_final_model(args).to(device)
-seg_scratch_pth = "/home/confetti/e5_workspace/hive1/outs/seg_bnd/bnd_seg_finetune_scratch_3moduler_level2_avg_pool8_cldice_smallerlr/model_epoch_150.pth"
-ckpt = torch.load(seg_scratch_pth)
-load_result = cmpsd_model.load_state_dict(ckpt['cmpsd_model'])
-print_load_result(load_result)
+mlp_out_c=12
+seg_head     = ConvSegHead(mlp_out_c, 1).to(device)
 
-C=12
-seg_head     = ConvSegHead(C, 1).to(device)
-load_result = seg_head.load_state_dict(ckpt['seg_head'])
-print_load_result(load_result)
-cnn_ckpt_path = data_prefix / "weights" / "rm009_3d_ae_best.pth"
-mlp_ckpt_pth = "outs/contrastive_run_rm009/rm009_v1/l2_avg8_roi_postopk_numparis16384_batch4096_nview4_d_near6_shuffle20_csine_anllr/checkpoints/epoch_8300.pth" 
+#~~~~~~~~~ load weights from previous 3moduler_scratch training ~~~~~~~~~~~~~~#
+# seg_scratch_pth = "/home/confetti/e5_workspace/hive1/outs/seg_bnd/bnd_seg_finetune_scratch_3moduler_level2_avg_pool8_cldice_smallerlr/model_epoch_150.pth"
+# ckpt = torch.load(seg_scratch_pth)
+# load_result = cmpsd_model.load_state_dict(ckpt['cmpsd_model'])
+# print_load_result(load_result)
+# load_result = seg_head.load_state_dict(ckpt['seg_head'])
+# print_load_result(load_result)
 
-# load_encoder2encoder(cmpsd_model.cnn_encoder, cnn_ckpt_path)
-# cmpsd_model.cnn_encoder.requires_grad_(False)   # no grads
-# cmpsd_model.cnn_encoder.eval()                  # BN/Dropout → inference
+#~~~~~~~~~ load weigts from contrastive pretraining into first two module~~~~~~~#
+cnn_ckpt_path = data_prefix / "weights" / "ae_feats_nissel_v1_roi1_decaylr_e1600.pth"
+mlp_ckpt_pth = "outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5750.pth" 
 
-# mlp_weights_dict = torch.load(mlp_ckpt_pth)['model']
-# load_mlp_ckpt_to_convmlp(cmpsd_model.mlp_encoder,mlp_weight_dict=mlp_weights_dict,dims=3)
-# cmpsd_model.mlp_encoder.requires_grad_(False)   # no grads
-# cmpsd_model.mlp_encoder.eval()                  # BN/Dropout → inference
+load_encoder2encoder(cmpsd_model.cnn_encoder, cnn_ckpt_path)
+cmpsd_model.cnn_encoder.requires_grad_(False)   # no grads
+cmpsd_model.cnn_encoder.eval()                  # BN/Dropout → inference
+
+mlp_weights_dict = torch.load(mlp_ckpt_pth)['model']
+load_mlp_ckpt_to_convmlp(cmpsd_model.mlp_encoder,mlp_weight_dict=mlp_weights_dict,dims=3)
+cmpsd_model.mlp_encoder.requires_grad_(False)   # no grads
+cmpsd_model.mlp_encoder.eval()                  # BN/Dropout → inference
+
 # verify it's really frozen
-n_learnable = sum(p.numel() for p in cmpsd_model.cnn_encoder.parameters())
-print(f"[info] learnable cnn_encoder params: {n_learnable:,}")
-n_learnable = sum(p.numel() for p in cmpsd_model.mlp_encoder.parameters())
-print(f"[info] learnable mlp params: {n_learnable:,}")
+[f"{n}" for n, p in cmpsd_model.named_parameters() if not p.requires_grad]
 
-
-register_hooks(cmpsd_model.mlp_encoder, "mlp.")  # you can add cnn if needed
+register_hooks(seg_head, "seghead.")  # you can add cnn if needed
 print("Registered layers:", LAYER_ORDER)
 
 summary(cmpsd_model, (1, *args.input_size))
 
 # Flip the *whole* model back to training mode (the encoder stays in eval() because we set it explicitly)
-cmpsd_model.train()
+cmpsd_model.eval()
 seg_head.train()
 
 args.lr_start = 1e-5
@@ -261,16 +261,15 @@ args.lr_start = 1e-5
 warmup_epochs = 10
 max_epochs = args.num_epochs
 
-trainable_params = filter(lambda p: p.requires_grad, cmpsd_model.parameters())
-optimizer = torch.optim.Adam( itertools.chain(cmpsd_model.parameters(), seg_head.parameters()),lr=args.lr_start)
+# trainable_params = filter(lambda p: p.requires_grad, cmpsd_model.parameters())
 # optimizer = torch.optim.Adam(trainable_params, lr=args.lr_start)
+# optimizer = torch.optim.Adam( itertools.chain(cmpsd_model.parameters(), seg_head.parameters()),lr=args.lr_start)
+optimizer = torch.optim.Adam( itertools.chain(seg_head.parameters()),lr=args.lr_start)
+
+from lib.core.scheduler import WarmupCosineLR
+scheduler = WarmupCosineLR(optimizer,warmup_epochs,max_epochs)
 
 
-scheduler= torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-    optimizer,
-    T_0=20,     # length of the first cycle (epochs or steps—your call)
-    T_mult=2,   # multiply the length each time: 10 → 20 → 40 …
-)
 
 # %% ---------- data loaders & loggers (unchanged) -----------------------------
 
@@ -279,10 +278,16 @@ loader         = DataLoader(dataset, batch_size=4, shuffle=True, drop_last=False
 valid_dataset  = get_valid_dataset(args,bnd=True,bool_mask=True)
 valid_loader   = DataLoader(valid_dataset, batch_size=4, shuffle=False, drop_last=False)
 
+#~~~~~~~ cldice loss ~~~~~~~~#
 from lib.loss.cldice import get_loss
-
 loss_fn = get_loss()
-start_epoch = 150
+
+#~~~~~~~ weighted l1 loss ~~~~~~~~#
+# from lib.loss.l1 import WeightedL1Loss, compute_class_weights_from_dataset
+# class_weights = compute_class_weights_from_dataset(dataset, num_classes=2)
+# loss_fn = WeightedL1Loss(class_weights.to(device),reduction='mean', logits=True) 
+
+start_epoch = 0 
 # %% ---------- training loop --------------------------------------------------
 for epoch in tqdm(range(start_epoch,args.num_epochs)):
     train_loss = []
@@ -290,7 +295,9 @@ for epoch in tqdm(range(start_epoch,args.num_epochs)):
     for inputs, masks,targets in loader:
         inputs, masks,targets = inputs.to(device), masks.to(device),targets.to(device)
         optimizer.zero_grad()
-        logits = cmpsd_model(inputs)          # NEW
+        #make sure avgpooling is add to after first two cnn encoder
+        with torch.no_grad():
+            logits = cmpsd_model(inputs)          # NEW
         logits = seg_head(logits)  
 
         masks = masks.unsqueeze(1).unsqueeze(1)

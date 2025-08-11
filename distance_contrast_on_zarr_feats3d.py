@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from pathlib import Path
+from torchsummary import summary
 import zarr
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -192,10 +193,11 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
 def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
+    cfg.e5 = True 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"FEATl2_avg8_LOSSpostopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_cosdecay"
+    exp_name = f"FEATl2_avg{avg_pool}_LOSS_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_cosdecay_valide_with_avgpool"
     run_dir = Path("outs") /'contrastive_run_rm009'/'ae_mlp_rm009_v1'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -204,12 +206,13 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
+    feats_name = "feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr" # feats_shape: 470,500,750,64
     feats_map = zarr.open_array(str(data_prefix / "rm009" / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
-    feats_map = feats_map[:]
+    feats_map = feats_map[:,:,:600,:]
 
-    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False,hy=437,hx=656)
+    cfg.batch_size = 4096 
+    ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
     loader = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, drop_last=False, pin_memory=True)
 
     # ---------------- models ----------------------- #
@@ -220,12 +223,16 @@ def main():
     cfg.filters = cnn_filters_map[level_key] 
     cfg.kernel_size =cnn_kernler_size_map[level_key]
     cfg.mlp_filters = filters_map[level_key]
+    cfg.avg_pool_size = [8,8,8] 
 
     model = MLP(cfg.mlp_filters).to(device)
 
     #cmpsd_model for eval features in cnn and mlp, register hooks to it
     cmpsd_model = build_final_model(cfg).to(device)
     cmpsd_model.eval()
+    print(cmpsd_model)
+    summary(cmpsd_model,input_size=(1,256,256,256))
+    
     register_hooks(cmpsd_model.cnn_encoder, "cnn.")
     register_hooks(cmpsd_model.mlp_encoder, "mlp.")
     print("Registered layers:", LAYER_ORDER)
@@ -248,7 +255,7 @@ def main():
 
     # ---------------- validation data -------------- #
     eval_data = get_rm009_eval_data(E5=cfg.e5,img_no_list=[1])
-    cnn_ckpt = data_prefix / "weights" / "rm009_3d_ae_best.pth"
+    cnn_ckpt = data_prefix / "weights" / "ae_feats_nissel_v1_roi1_decaylr_e1600.pth"
 
     # ---------------- training loop ---------------- #
     n_epochs = cfg.num_epochs

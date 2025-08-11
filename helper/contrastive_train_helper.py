@@ -908,6 +908,7 @@ def log_layer_embeddings(
 
         # you stored single tensor per key; if you still store list use [-1]
         out_t = FEATURE_STORE[k][-1] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
+
         feat = out_t.detach().cpu().squeeze().numpy()  # could be [D,H,W,C], [H,W,C], [C,D,H,W], or [C,H,W]
 
         # --- Normalize to channel-last; if 4D, also standardize to [D,H,W,C] ---

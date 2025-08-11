@@ -253,8 +253,7 @@ loader         = DataLoader(dataset, batch_size=6, shuffle=True, drop_last=False
 valid_dataset  = get_valid_dataset(args,bnd=True)
 valid_loader   = DataLoader(valid_dataset, batch_size=6, shuffle=False, drop_last=False)
 
-from train_seghead_helper import ComboLoss,compute_class_weights_from_dataset
-from lib.loss.l1 import WeightedL1Loss
+from lib.loss.l1 import WeightedL1Loss, compute_class_weights_from_dataset
 
 class_weights = compute_class_weights_from_dataset(dataset, num_classes=2)
 # class_weights[0]=0.1

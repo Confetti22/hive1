@@ -112,7 +112,6 @@ class Trainer:
             loss.backward()
             
             self.optimizer.step()
-            lr_schedule.step()
 
             # === Logging === #
             torch.cuda.synchronize()
@@ -151,7 +150,6 @@ class Trainer:
                         merged = (merged - merged.min()) / (merged.max() - merged.min())
 
                         self.writer.add_image('x and re_x ',merged,it,dataformats='HW')
-
 
 
         metric_logger.synchronize_between_processes()
@@ -241,6 +239,7 @@ class Trainer:
 
             save_recon_img_flag = ( (epoch +1 ) %self.args.save_every==0)
             self.train_one_epoch(epoch, lr_schedule,save_recon_img_flag,MSE_loss=True)
+            lr_schedule.step()
 
             # === eval and save model === #
             if self.args.main and (epoch + 1)% self.args.save_every == 0:

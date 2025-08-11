@@ -40,6 +40,7 @@ from helper.contrastive_train_helper import (
     log_layer_embeddings,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
+from lib.core.scheduler import WarmupCosineLR
 
 # =============================================================================
 # Utility helpers
@@ -48,7 +49,7 @@ from lib.arch.ae import build_final_model, load_compose_encoder_dict
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Contrastive 3-D feature training")
     p.add_argument("--cfg", type=str, default='config/t11_3d.yaml', help="Path to YAML config")
-    p.add_argument("--ckpt", type=str, default=None, help="outs/contrastive_run_t1779/on_rhems_postopk_numparis16384_batch2048_nview4_d_near8_shuffle20_csine_anllr/checkpoints/epoch_8250.pth")
+    p.add_argument("--ckpt", type=str, default=None,)
     p.add_argument("--device", type=str, default="cuda", help="cuda | cpu | cuda:0 …")
     return p.parse_args()
 
@@ -192,11 +193,12 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
 def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
+    cfg.e5 = True 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     sample_name ='t1779'
     # --------------- experiment folder ------------- #
     avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"on_rhems_postopk_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr"
+    exp_name = f"test_on_rhems_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr_"
     # run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
     run_dir = Path("outs") /f'contrastive_run_{sample_name}'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
@@ -209,6 +211,7 @@ def main():
     feats_name = "ae_feats_nissel_l3_avg8_rhemisphere.zarr"
     feats_map = zarr.open_array(str(data_prefix / sample_name / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
+    print(f"{feats_map.shape= }")
     feats_map = feats_map[:]
 
     ds = Contrastive_dataset_3d(feats_map,d_near=cfg.d_near,num_pairs=cfg.num_pairs,n_view=cfg.n_views,verbose=False)
@@ -217,7 +220,14 @@ def main():
     # ---------------- models ----------------------- #
     level_key = 'l3'
     filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,64,32,12]}
+    cnn_filters_map ={'l1':[32],'l2':[32,64],'l3':[32,64,96]}
+    cnn_kernler_size_map ={'l1':[5],'l2':[5,5],'l3':[5,5,3]}
+    cfg.filters = cnn_filters_map[level_key]
+    cfg.kernel_size =cnn_kernler_size_map[level_key]
     cfg.mlp_filters = filters_map[level_key]
+    cfg.avg_pool_size = [8,8,8] 
+    cfg.last_encoder = True 
+    cfg.batch_size = 4096
 
     model = MLP(cfg.mlp_filters).to(device)
 
@@ -229,19 +239,11 @@ def main():
     print("Registered layers:", LAYER_ORDER)
 
     # --------------- optim & sched ----------------- #
-    opt = optim.Adam(model.parameters(), lr=2e-4)
+    opt = optim.Adam(model.parameters(), lr=4e-5)
     warmup_epochs= 20
 
-    warmup = torch.optim.lr_scheduler.LinearLR(
-        opt, start_factor=1e-8, end_factor=1.0, total_iters=warmup_epochs
-    )
-    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt, T_max=cfg.num_epochs  - warmup_epochs, eta_min=0.0
-    )
-    sched = torch.optim.lr_scheduler.SequentialLR(
-        opt, schedulers=[warmup, cosine], milestones=[warmup_epochs]
-    )
-
+    sched = WarmupCosineLR(opt,warmup_epochs=warmup_epochs,max_epochs=cfg.num_epochs)
+    
 
     # --------------- resume logic ------------------ #
     start_epoch = 0
@@ -266,7 +268,7 @@ def main():
 
         train_one_epoch(model, loader, opt, device, epoch, writer,
                         n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,
-                        only_pos=True)
+                        only_pos=False)
         sched.step()
         # validation
         if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs or epoch ==0:

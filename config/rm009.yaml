@@ -1,4 +1,4 @@
-exp_name : "train_ae_on_rm009_right_v1_roi1_warmup_decay2" #exp_name used to distinguish each run
+exp_name : "train_ae_on_rm009_right_v1_roi1_warmup_decay3" #exp_name used to distinguish each run
 out: "outs/ae_out" #path to output directory
 
 # system:

@@ -145,7 +145,7 @@ def extract_features_to_zarr(
     device: str = "cuda",
     # NEW ↓
     layer_path: str = "",           # path to layer inside the model (“” = model output)
-    pool_size: int | None = None,   # applied after model, so if model contains pool_size, do not apply twice
+    pool_size: int | None = None,   # applied after model, so if model forward before the layer_path contains pool_size, do not apply twice
 ) -> None:
     """Extract a *single* feature map (optionally pooled) and store it in Zarr."""
     model.eval().to(device)
@@ -253,7 +253,7 @@ from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
 #%%
 
-cfg = load_cfg("config/rm009.yaml")
+cfg = load_cfg("../config/rm009.yaml")
 avg_pool = 8 
 cfg.avg_pool_size = [avg_pool] * 3
 cfg.last_encoder = False 
@@ -275,7 +275,7 @@ model = build_encoder_model(cfg, dims=3)
 load_encoder2encoder(model, f"{data_prefix}/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth")
 vol_path = f"/home/confetti/e5_data/{sample_name}/rm009.ims" 
 # vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
-save_zarr_path = f"{data_prefix}/{sample_name}/feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
+save_zarr_path = f"{data_prefix}/{sample_name}/_feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
 
 #%%
 extract_features_to_zarr(
@@ -388,9 +388,32 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False, cha
     plt.show()
 
 #%%
+save_zarr_path ='/home/confetti/data/t1779/corrected_feats_r0_p8.zarr'
+#%%
 summarise_zarr(save_zarr_path)
-plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=-1)
+plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=0)
 #%%
 img_coord = (120,3499,5250)  # arbitrary voxel in raw image space
 feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(8,8,8))
 print("Image coord", img_coord, "--> feature idx", feat_idx)
+#%%
+import zarr
+arr = zarr.open(str(save_zarr_path), mode="r")
+print(arr.shape)
+
+# %%
+z_slice = arr[235,180:220,:160,:]
+from sklearn.decomposition import PCA
+Hm, Wm, Cm = z_slice.shape
+
+flat = z_slice.reshape(-1, Cm).astype(np.float32)
+pca = PCA(n_components=3).fit_transform(flat)
+rgb = (pca - pca.min(0)) / (pca.ptp(0) + 1e-7)
+rgb = rgb.reshape(Hm, Wm, 3)
+plt.figure(figsize=(6, 6))
+plt.title("Mid-Z PCA-RGB")
+plt.imshow(rgb)
+# plt.axis("off")
+plt.show()
+
+# %%

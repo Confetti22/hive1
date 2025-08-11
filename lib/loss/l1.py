@@ -2,6 +2,7 @@ import torch.nn as nn
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 class Loss(nn.Module):
     def __init__(self, args):
@@ -16,6 +17,23 @@ class Loss(nn.Module):
 
 def get_loss(args):
     return Loss(args)
+
+
+
+def compute_class_weights_from_dataset(dataset, num_classes):
+    # Assume dataset returns (image, label), and label is a 3D/4D tensor
+    class_counts = np.zeros(num_classes)
+
+    for roi, mask,bnd in dataset:
+        # Flatten and count valid pixels only (label >= 0)
+        flat = bnd[mask >= 0].flatten()
+        counts = np.bincount(flat, minlength=num_classes)
+        class_counts[:len(counts)] += counts
+
+    total = class_counts.sum()
+    class_weights = total / (num_classes * class_counts + 1e-6)  # inverse frequency
+    return torch.tensor(class_weights, dtype=torch.float)
+
 
 
 class WeightedL1Loss(nn.Module):
