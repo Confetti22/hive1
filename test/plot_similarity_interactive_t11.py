@@ -11,9 +11,11 @@ from confettii.plot_helper import grid_plot_list_imgs
 import time
 device ='cuda'
 print(f'{os.getcwd()}=')
-args = load_cfg('config/t11_3d.yaml')
+args = load_cfg('config/rm009.yaml')
 
-level_key = 'l3'
+level_key = 'l2'
+args.last_encoder =  False 
+
 # filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,64,32,12]}
 filters_map={'l1':[32,24,12,12],'l2':[64,32,24,12],'l3':[96,48,24,12]}
 cnn_filters_map ={'l1':[32],'l2':[32,64],'l3':[32,64,96]}
@@ -27,13 +29,18 @@ args.avg_pool_padding =  False
 # the old result on rm009 did not load the correct encoder feats
 cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
-# cnn_ckpt_pth = '/home/confetti/e5_workspace/hive/rm009_ae_out/weights/test_rm009/Epoch_1451.pth'
-cnn_ckpt_pth = '/home/confetti/data/weights/t11_3d_ae_best2.pth'
-mlp_ckpt_pth ='/home/confetti/data/weights/t11_3d_mlp_best_new_format.pth'
+
+#old ckpt
+# cnn_ckpt_pth = '/home/confetti/data/weights/rm009_3d_ae_best.pth'
+# mlp_ckpt_pth ='/home/confetti/data/weights/rm009_postopk.pth'
+
+cnn_ckpt_pth = '/home/confetti/data/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth'
+# mlp_ckpt_pth = 'outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5950.pth'
+mlp_ckpt_pth = 'outs/contrastive_run_rm009/ae_mlp_rm009_v1/FEATl2_avg8_LOSS_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5450.pth'
 #%%
 import torch
-# mlp_model_ckpt = torch.load(mlp_ckpt_pth)['model']
-mlp_model_ckpt = torch.load(mlp_ckpt_pth)
+mlp_model_ckpt = torch.load(mlp_ckpt_pth)['model']
+# mlp_model_ckpt = torch.load(mlp_ckpt_pth)
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_weight_dict=mlp_model_ckpt,dims=args.dims)
 #%%
 encoder_model = build_encoder_model(args,dims=3) 
@@ -47,15 +54,15 @@ import torch
 from lib.utils.preprocess_img import pad_to_multiple_of_unit
 import numpy as np
 import matplotlib.pyplot as plt
-vol = tif.imread('/home/confetti/data/t1779/test_data_part_brain/0003.tif')
+vol = tif.imread('/home/confetti/data/rm009/seg_valid/_0001.tif')
 zoom_factor= 8
 print(f"{vol.shape= }")
 # vol = pad_to_multiple_of_unit(vol,unit=zoom_factor) 
 print(f"after padding: {vol.shape= }")
 mask = tif.imread('/home/confetti/data/rm009/seg_valid/_0001_human_mask_3d.tif')
 print(f"{mask.shape= }")
-# vol = vol[:,432:1100,206:1329]
-# mask = mask[:,432:1100,206:1329]
+vol = vol[:,432:1100,206:1329]
+mask = mask[:,432:1100,206:1329]
 
 mask_slice = mask[32]
 batch_size = 512 

@@ -32,6 +32,7 @@ import zarr
 from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
     cos_loss_topk,
+    cos_loss,
     get_t11_eval_data,
     MLP,
     Contrastive_dataset_3d,
@@ -144,7 +145,8 @@ def train_one_epoch(
     *,
     n_views: int,
     pos_weight_ratio: float,
-    only_pos: bool,
+    loss_fn,
+    only_pos: bool = True, # only_pos controls whether to only use topk on positive_pairs in cos_loss_topk, do not infect coss_loss function
 ):
     model.train()
     run_loss =  0.0
@@ -154,7 +156,7 @@ def train_one_epoch(
         batch = torch.cat(batch, dim=0).to(device)  # [B*n_views, C]
         optimizer.zero_grad()
         feats = model(batch).squeeze()
-        loss, pos_cos, neg_cos = cos_loss_topk(
+        loss, pos_cos, neg_cos = loss_fn(
             features=feats,
             n_views=n_views,
             pos_weight_ratio=pos_weight_ratio,
@@ -228,6 +230,7 @@ def main():
     cfg.avg_pool_size = [8,8,8] 
     cfg.last_encoder = True 
     cfg.batch_size = 4096
+    loss_fn = cos_loss
 
     model = MLP(cfg.mlp_filters).to(device)
 
@@ -267,8 +270,8 @@ def main():
     for epoch in range(start_epoch, n_epochs):
 
         train_one_epoch(model, loader, opt, device, epoch, writer,
-                        n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,
-                        only_pos=False)
+                        n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,loss_fn=loss_fn,
+                        only_pos=only_pos)
         sched.step()
         # validation
         if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs or epoch ==0:

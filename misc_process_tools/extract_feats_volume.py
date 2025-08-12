@@ -192,6 +192,7 @@ def extract_features_to_zarr(
 
         zarr_shape = tuple(nb * cs for nb, cs in zip(num_blocks, chunk_shape)) + (feat_dim,)
         zarr_chunk = tuple(chunk_shape) + (feat_dim,)
+        print(f"{region_stride =}, {zarr_shape= }, {zarr_chunk= },{num_blocks= }")
         store = zarr.open(str(zarr_path), mode="w", shape=zarr_shape, dtype="float32", chunks=zarr_chunk)
 
         pbar = tqdm(total=math.prod(num_blocks), unit="block", desc="Feature extraction")
@@ -251,16 +252,7 @@ project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_dir)
 from config.load_config import load_cfg
 from lib.arch.ae import build_encoder_model, load_encoder2encoder 
-#%%
 
-cfg = load_cfg("../config/rm009.yaml")
-avg_pool = 8 
-cfg.avg_pool_size = [avg_pool] * 3
-cfg.last_encoder = False 
-cfg.filters = [32,64]
-cfg.kernel_size = [5,5]
-
-#%%
 E5 =False
 if E5:
     data_prefix = "/share/home/shiqiz/data"
@@ -270,28 +262,36 @@ else:
     workspace_prefix = '/home/confetti/e5_workspace/hive1'
 
 
-sample_name = 'rm009'
+#%%
+
+cfg = load_cfg("config/t11_3d.yaml")
+avg_pool = 8 
+cfg.avg_pool_size = [avg_pool] * 3
+cfg.last_encoder = True 
+cfg.filters = [32,64,96]
+cfg.kernel_size = [5,5,3]
+sample_name = 't1779'
 model = build_encoder_model(cfg, dims=3)
-load_encoder2encoder(model, f"{data_prefix}/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth")
-vol_path = f"/home/confetti/e5_data/{sample_name}/rm009.ims" 
+load_encoder2encoder(model, f"{data_prefix}/weights/t11_3d_ae_best2.pth")
+vol_path = f"/home/confetti/e5_data/{sample_name}/t1779.ims" 
 # vol_path = '/share/data/VISoR_Reconstruction/SIAT_SIAT/BiGuoqiang/Macaque_Brain/RM009_2/Analysis/ROIReconstruction/ROIImage/z13750_c1.ims'
-save_zarr_path = f"{data_prefix}/{sample_name}/_feat_l2_avg8_v1roi_ae_feats_nissel_v1_roi1_decaylr_e1600.zarr"
+save_zarr_path = f"{data_prefix}/{sample_name}/ae_feats_nissel_l3_avg8_rhemisphere2.zarr"
 
 #%%
 extract_features_to_zarr(
     vol_path= vol_path,
-    channel=1,
+    channel=2,
     model=model,
     zarr_path=save_zarr_path,
-    global_offset=(13750,3500,9250),
-    whole_volume_size=(3750,3500,5250),
-    region_size=(64, 1024,1024),
-    roi_size=(32,32,32),
-    roi_stride=(8,8,8),
-    batch_size= 4096,
+    global_offset=(3392,2512,7008),
+    whole_volume_size=(6784,5000,4000),
+    region_size=(64,1536,1536),
+    roi_size=(64,64,64),
+    roi_stride=(16,16,16),
+    batch_size= 1024,
     device="cuda",
-    layer_path="down_layers.0",  # pick *one* internal layer
-    pool_size=8,                 # or None / 1 for “no pooling”
+    # layer_path="down_layers.0",  # pick *one* internal layer
+    # pool_size=8,                 # or None / 1 for “no pooling”
 )
 
 
@@ -388,10 +388,40 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False, cha
     plt.show()
 
 #%%
-save_zarr_path ='/home/confetti/data/t1779/corrected_feats_r0_p8.zarr'
+import zarr
+save_zarr_path1 ='/home/confetti/data/t1779/ae_feats_nissel_l3_avg8_rhemisphere.zarr'
+save_zarr_path2 ='/home/confetti/data/t1779/ae_feats_nissel_l3_avg8_rhemisphere2.zarr'
+arr1= zarr.open(str(save_zarr_path1),model='r')
+arr2= zarr.open(str(save_zarr_path2),model='r')
+slice1 = arr1[0:64,:,:,:]
+slice2 = arr2[0,:,:,:]
+print(f"{slice1.min()=}, {slice2.min()= }")
+
+import numpy as np
+import matplotlib.pyplot as plt
+from skimage.filters import threshold_otsu
+
+def get_thres_otsu(arr):
+# Compute Otsu's threshold
+    arr = arr[(arr >= -500) & (arr <= 500)]
+    thresh = threshold_otsu(arr)
+    # Plot histogram
+    plt.figure(figsize=(6, 4))
+    plt.hist(arr.ravel(), bins=256, color='gray', alpha=0.7)
+    plt.axvline(thresh, color='red', linestyle='--', linewidth=2, label=f'Otsu Threshold = {thresh:.2f}')
+    plt.title("Histogram with Otsu Threshold")
+    plt.xlabel("Pixel Value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
+    print("Otsu Threshold:", thresh)
+
+get_thres_otsu(slice1)
+get_thres_otsu(slice2)
+
 #%%
 summarise_zarr(save_zarr_path)
-plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=0)
+plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=-1)
 #%%
 img_coord = (120,3499,5250)  # arbitrary voxel in raw image space
 feat_idx = image_to_feature_coord(img_coord, img_offset=(0, 0, 0), roi_stride=(8,8,8))

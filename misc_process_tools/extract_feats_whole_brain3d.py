@@ -17,7 +17,7 @@ import zarr
 from confettii.feat_extract import TraverseDataset3d, get_feature_list
 
 device ='cuda'
-args = load_cfg('../config/rm009.yaml')
+args = load_cfg('config/rm009.yaml')
 "try avg on None, 5, 9"
 avg_pool = 3
 args.avg_pool_size = [avg_pool]*3
@@ -29,7 +29,7 @@ cnn_ckpt_pth = '/home/confetti/data/weights/rm009_3d_ae_best.pth'
 cluster_ckpt_pth = '/share/home/shiqiz/data/rm009/ae.pth'
 cnn_ckpt_pth = cluster_ckpt_pth if E5 else cnn_ckpt_pth
 #%%
-log_pth = f'../outs/extract_feats/roi_level3_avg{avg_pool}.log'
+log_pth = f'outs/extract_feats/roi_level3_avg{avg_pool}.log'
 import sys
 from contextlib import redirect_stdout
 with open(log_pth, 'w') as f:
@@ -67,39 +67,38 @@ print(f"raw_volume_size{raw_volume_size}")
 #%%
 # whole_volume_size = [int(element//2) for element in raw_volume_size]
 # whole_volume_offset = [int(element//4) for element in raw_volume_size]
-whole_volume_size = raw_volume_size 
-# whole_volume_size = [64,2048,2048] 
-whole_volume_offset = [0,0,0]
+whole_volume_size = (64,5000,4000)
+whole_volume_offset = (6000,2048,7008)
 
 #%% check for the roi to be extracted feats on
-import numpy as np
-z_offset,y_offset,x_offset = whole_volume_offset 
-z_span     = whole_volume_size[0]   # distance from first to last (your "+3750")
-z_last     = z_offset + z_span   # = 5125  (you used this for last_z_slice)
+# import numpy as np
+# z_offset,y_offset,x_offset = whole_volume_offset 
+# z_span     = whole_volume_size[0]   # distance from first to last (your "+3750")
+# z_last     = z_offset + z_span   # = 5125  (you used this for last_z_slice)
 
-y_size , x_size = whole_volume_size[1:]
+# y_size , x_size = whole_volume_size[1:]
 
-n_slices = 6
+# n_slices = 6
 
-# Evenly spaced (including first & last)
-z_indices = np.round(np.linspace(z_offset, z_last, n_slices)).astype(int)
+# # Evenly spaced (including first & last)
+# z_indices = np.round(np.linspace(z_offset, z_last, n_slices)).astype(int)
 
-# Pull the slices
-slices = [
-    ims_vol.from_roi(
-        coords=(z, y_offset, x_offset, 1, y_size, x_size),level=0)
-    for z in z_indices]
+# # Pull the slices
+# slices = [
+#     ims_vol.from_roi(
+#         coords=(z, y_offset, x_offset, 1, y_size, x_size),level=0)
+#     for z in z_indices]
 
-# Optionally stack into an array of shape (6, Y, X)
-import numpy as np
-slices_ary = np.stack(slices, axis=0)
-import napari
-viewer = napari.Viewer()
-viewer.add_image(slices_ary)
-napari.run()
+# # Optionally stack into an array of shape (6, Y, X)
+# import numpy as np
+# slices_ary = np.stack(slices, axis=0)
+# import napari
+# viewer = napari.Viewer()
+# viewer.add_image(slices_ary)
+# napari.run()
 
-print(f"whole_volume_size{whole_volume_size}")
-print(f"whole_volume_offset{whole_volume_offset}")
+# print(f"whole_volume_size{whole_volume_size}")
+# print(f"whole_volume_offset{whole_volume_offset}")
 #%%
 batch_size = 256 
 
@@ -108,8 +107,8 @@ batch_size = 256
 cnn_feature_dim =96
 mlp_feature_dim =12
 region_size=[64,1536,1536]
-roi_size =[16,16,16]
-roi_stride =[4,4,4]
+roi_size =[64,64,64]
+roi_stride =[16,16,16]
 step = [int(2*(1/2)*r_size/r_stride -1) for r_size, r_stride in zip(roi_size,roi_stride) ]
 step_size = roi_stride
 margin = [int(s * s_size) for s,s_size in zip(step,step_size)]
@@ -145,6 +144,7 @@ zarr_chunk_shape = tuple( int(elem) for elem in zarr_chunk_shape)
 print(f"zarr_blcok_num{zarr_block_num}")
 print(f"zarr_chunk_shape{zarr_chunk_shape}")
 print(f"zarr_shape{zarr_shape}")
+exit(0)
 
 save_zarr_file_name = f'half_brain_cnn_feats_avg{avg_pool}'
 cluster_zarr_path = f"/share/home/shiqiz/data/rm009/{save_zarr_file_name}_r{level}.zarr"

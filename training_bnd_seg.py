@@ -95,7 +95,6 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
             loss = loss_fn(logits,targets,masks)
             valid_loss.append(loss.item())
 
-
             probs  = torch.sigmoid(logits)
             pred  = (probs >= 0.5).long()
             
@@ -186,11 +185,11 @@ def bnd_seg_valid(img_logger, valid_loader, cmpsd_model,epoch,valid_first_batch=
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 cfg_path = 'config/seghead.yaml'
 args = load_cfg(cfg_path)
-args.e5 =False 
+args.e5 = True 
 data_prefix   = Path("/share/home/shiqiz/data" if args.e5 else "/home/confetti/data")
 
 exp_save_dir   = 'outs/seg_bnd'
-exp_name       = f"_bnd_seg_3moduler_on_mlp_feats_continue_{args.feats_level}_avg_pool{args.feats_avg_kernel}_cldice_smallerlr"
+exp_name       = f"bnd_seg_3moduler_on_mlp_feats_normcontrastiveloss_{args.feats_level}_avg_pool{args.feats_avg_kernel}_cldice_smallerlr"
 # exp_name       = f"bnd_seg_on_stractch"
 model_save_dir = f"{exp_save_dir}/{exp_name}"
 os.makedirs(model_save_dir, exist_ok=True)
@@ -202,6 +201,7 @@ train_img_logger= HTMLFigureLogger(exp_save_dir + '/' + exp_name, html_name="tra
 
 args.filters = [32,64]
 args.last_encoder= len(args.filters)==3
+args.num_epochs = 1000
 
 args.mlp_filters =[64,32,24,12]
 args.data_path_dir = f"{data_prefix}/rm009/boundary_seg/rois"
@@ -233,10 +233,11 @@ seg_head     = ConvSegHead(mlp_out_c, 1).to(device)
 
 #~~~~~~~~~ load weigts from contrastive pretraining into first two module~~~~~~~#
 cnn_ckpt_path = data_prefix / "weights" / "ae_feats_nissel_v1_roi1_decaylr_e1600.pth"
-mlp_ckpt_pth = "outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5750.pth" 
+# mlp_ckpt_pth = "outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5850.pth" #continue
+mlp_ckpt_pth = "outs/contrastive_run_rm009/ae_mlp_rm009_v1/FEATl2_avg8_LOSS_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_5400.pth" 
 
 load_encoder2encoder(cmpsd_model.cnn_encoder, cnn_ckpt_path)
-cmpsd_model.cnn_encoder.requires_grad_(False)   # no grads
+cmpsd_model.cnn_encoder.requires_grad_(False)   # no grads# ontinue
 cmpsd_model.cnn_encoder.eval()                  # BN/Dropout → inference
 
 mlp_weights_dict = torch.load(mlp_ckpt_pth)['model']
@@ -245,7 +246,8 @@ cmpsd_model.mlp_encoder.requires_grad_(False)   # no grads
 cmpsd_model.mlp_encoder.eval()                  # BN/Dropout → inference
 
 # verify it's really frozen
-[f"{n}" for n, p in cmpsd_model.named_parameters() if not p.requires_grad]
+print("frozen model's layer name",[f"{n}" for n, p in cmpsd_model.named_parameters() if not p.requires_grad])
+print("unfrozen model's layer name",[f"{n}" for n, p in cmpsd_model.named_parameters() if  p.requires_grad])
 
 register_hooks(seg_head, "seghead.")  # you can add cnn if needed
 print("Registered layers:", LAYER_ORDER)
@@ -256,7 +258,7 @@ summary(cmpsd_model, (1, *args.input_size))
 cmpsd_model.eval()
 seg_head.train()
 
-args.lr_start = 1e-5
+args.lr_start = 1e-4
 # args.lr_end = 1e-5
 warmup_epochs = 10
 max_epochs = args.num_epochs
@@ -306,12 +308,12 @@ for epoch in tqdm(range(start_epoch,args.num_epochs)):
         loss = loss_fn(logits,targets,masks)
         loss.backward()
         optimizer.step()
-        scheduler.step()
 
         train_loss.append(loss.item())
 
         FEATURE_STORE.clear()   # free memory
 
+    scheduler.step()
     avg_loss = sum(train_loss) / len(train_loss)
     current_lr = scheduler.get_last_lr()[0]
     writer.add_scalar('lr',scheduler.get_last_lr()[0] , epoch)

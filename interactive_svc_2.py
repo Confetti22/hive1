@@ -1,4 +1,5 @@
 import napari
+import torch
 import numpy as np
 from magicgui import magicgui
 from helper.simple_viewer import SimpleViewer2
@@ -25,13 +26,18 @@ from torchvision.models import Inception_V3_Weights
 device ='cuda'
 
 args = load_cfg('config/t11_3d.yaml')
+
+args.last_encoder = True
 args.avg_pool_size = (8,8,8) 
+args.mlp_filters = [96,64,32,12]
 
 cmpsd_model = build_final_model(args)
 cmpsd_model.eval().to(device)
 cnn_ckpt_pth = '/home/confetti/data/weights/t11_3d_ae_best2.pth'
-mlp_ckpt_pth ='/home/confetti/data/weights/t11_3d_mlp_best_new_format.pth'
-load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
+# mlp_ckpt_pth ='/home/confetti/data/weights/t11_3d_mlp_best_new_format.pth'
+mlp_ckpt_pth ='/home/confetti/e5_workspace/hive1/outs/contrastive_run_t1779/test_on_rhems_numparis16384_batch4096_nview4_d_near8_shuffle20_csine_anllr_/checkpoints/epoch_6000.pth'
+mlp_weights_dict = torch.load(mlp_ckpt_pth)['model']
+load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_weight_dict=mlp_weights_dict,dims=args.dims)
 
 encoder_model = build_encoder_model(args,dims=3) 
 encoder_model.eval().to(device)

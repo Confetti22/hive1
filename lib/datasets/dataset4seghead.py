@@ -47,21 +47,17 @@ class SegDataset(Dataset):
             self.valid_bnd_path = args.e5_valid_bnd_path_dir if self.e5 else args.valid_bnd_path_dir
             current_bnd_path = self.valid_bnd_path if self.valid else self.bnd_path
 
-        # Collect files ending with `.tif`
-
-        valid_exts = ('.tif', '.tiff', '.pkl')          # any you want to keep
-
         self.files = sorted(
             [os.path.join(current_data_path, fname) 
             for fname in os.listdir(current_data_path) 
-            if fname.endswith(valid_exts)],
+            if fname.endswith(('.tif', '.tiff', '.pkl') )],
             key=lambda x: int(os.path.basename(x)[:4])
         )
 
         self.masks_files = sorted(
             [os.path.join(current_mask_path, fname) 
             for fname in os.listdir(current_mask_path) 
-            if fname.endswith('.tif')],
+            if fname.endswith(('.tif','.tiff'))],
             key=lambda x: int(os.path.basename(x)[:4])
         )
 
@@ -69,7 +65,7 @@ class SegDataset(Dataset):
             self.bnd_files = sorted(
                 [os.path.join(current_bnd_path, fname) 
                 for fname in os.listdir(current_bnd_path) 
-                if fname.endswith('.tif')],
+                if fname.endswith(('.tif','.tiff'))],
                 key=lambda x: int(os.path.basename(x)[:4])
             )
             self.bnd_files  = self.bnd_files[:int(use_ratio*len(self.bnd_files))]
