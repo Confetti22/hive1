@@ -243,10 +243,10 @@ class Contrastive_dataset_3d(Dataset):
         if self.dims == 3:
             D, H, W, C = feats_map.shape
             # --------- derive bounds (fallback to auto-computed) ----------
-            lz = lz if lz is not None else d_near 
+            lz = lz if lz is not None else d_near + margin 
             ly = ly if ly is not None else d_near + margin
             lx = lx if lx is not None else d_near + margin
-            hz = hz if hz is not None else D - d_near 
+            hz = hz if hz is not None else D - d_near - margin 
             hy = hy if hy is not None else H - d_near - margin
             hx = hx if hx is not None else W - d_near - margin
 
@@ -360,26 +360,6 @@ def generate_sphereshell__shifts(R, r=0, dims=3):
             shifts.append(shift)
     return np.array(shifts)
 
-
-import torch
-import torch.nn as nn
-
-class MLP(nn.Module):
-    def __init__(self, filters=[24, 18, 12, 8]):
-        super(MLP, self).__init__()
-        
-        layers = []
-        for in_features, out_features in zip(filters[:-1], filters[1:]):
-            layers.append(nn.Linear(in_features, out_features))
-        
-        self.layers = nn.ModuleList(layers)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        for layer in self.layers[:-1]:
-            x = self.relu(layer(x))
-        x = self.layers[-1](x)  # Last layer, no activation
-        return x / x.norm(p=2, dim=-1, keepdim=True)
 
 def cos_loss(features,n_views,pos_weight_ratio=5,enhanced =False):
 

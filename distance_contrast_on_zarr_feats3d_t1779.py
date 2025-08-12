@@ -32,7 +32,6 @@ import zarr
 from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
     cos_loss_topk,
-    cos_loss,
     get_t11_eval_data,
     MLP,
     Contrastive_dataset_3d,
@@ -145,8 +144,8 @@ def train_one_epoch(
     *,
     n_views: int,
     pos_weight_ratio: float,
-    loss_fn,
-    only_pos: bool = True, # only_pos controls whether to only use topk on positive_pairs in cos_loss_topk, do not infect coss_loss function
+    loss_topk: bool = False,
+    loss_only_pos: bool = True, # only_pos controls whether to only use topk on positive_pairs in cos_loss_topk, do not infect coss_loss function
 ):
     model.train()
     run_loss =  0.0
@@ -156,11 +155,12 @@ def train_one_epoch(
         batch = torch.cat(batch, dim=0).to(device)  # [B*n_views, C]
         optimizer.zero_grad()
         feats = model(batch).squeeze()
-        loss, pos_cos, neg_cos = loss_fn(
+        loss, pos_cos, neg_cos = cos_loss_topk(
             features=feats,
             n_views=n_views,
             pos_weight_ratio=pos_weight_ratio,
-            only_pos=only_pos,
+            topk=loss_topk,
+            only_pos=loss_only_pos,
         )
         loss.backward()
         optimizer.step()
@@ -195,13 +195,11 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
 def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
-    cfg.e5 = True 
+    cfg.e5 = False 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     sample_name ='t1779'
     # --------------- experiment folder ------------- #
-    avg_pool = cfg.avg_pool_size[0] if "avg_pool_size" in cfg else 8
-    exp_name = f"test_on_rhems_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr_"
-    # run_dir = Path("outs") /'contrastive_run_rm009'/'rm009_v1'/ exp_name
+    exp_name = f"normcosloss_rhems_numparis{cfg.num_pairs}_batch{cfg.batch_size}_nview{cfg.n_views}_d_near{cfg.d_near}_shuffle{cfg.shuffle_very_epoch}_csine_anllr_"
     run_dir = Path("outs") /f'contrastive_run_{sample_name}'/ exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -210,7 +208,7 @@ def main():
 
     # ---------------- data prefixes ---------------- #
     data_prefix = Path("/share/home/shiqiz/data" if cfg.e5 else "/home/confetti/data")
-    feats_name = "ae_feats_nissel_l3_avg8_rhemisphere.zarr"
+    feats_name = "ae_feats_nissel_l3_avg8_rhemisphere2.zarr"
     feats_map = zarr.open_array(str(data_prefix / sample_name / feats_name), mode="r")
     #load all the feats into memory if it can, will accelate indexing feats
     print(f"{feats_map.shape= }")
@@ -229,15 +227,16 @@ def main():
     cfg.mlp_filters = filters_map[level_key]
     cfg.avg_pool_size = [8,8,8] 
     cfg.last_encoder = True 
-    cfg.batch_size = 4096
-    loss_fn = cos_loss
+    cfg.batch_size = 2048 
+    topk = False #whether to use topk_loss
+    only_pos = True #only_pos only works if topk is True
 
     model = MLP(cfg.mlp_filters).to(device)
 
     #cmpsd_model for eval features in cnn and mlp, register hooks to it
     cmpsd_model = build_final_model(cfg).to(device)
     cmpsd_model.eval()
-    register_hooks(cmpsd_model.cnn_encoder, "cnn.")
+    # register_hooks(cmpsd_model.cnn_encoder, "cnn.")
     register_hooks(cmpsd_model.mlp_encoder, "mlp.")
     print("Registered layers:", LAYER_ORDER)
 
@@ -270,8 +269,8 @@ def main():
     for epoch in range(start_epoch, n_epochs):
 
         train_one_epoch(model, loader, opt, device, epoch, writer,
-                        n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,loss_fn=loss_fn,
-                        only_pos=only_pos)
+                        n_views=cfg.n_views, pos_weight_ratio=cfg.pos_weight_ratio,loss_topk=topk,
+                        loss_only_pos=only_pos)
         sched.step()
         # validation
         if (epoch + 1) % valid_every == 0 or epoch + 1 == n_epochs or epoch ==0:
