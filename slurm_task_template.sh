@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/training_bnd_seg.py"
+SCRIPT_PATH="/share/home/shiqiz/workspace/hive1/distance_contrast_on_zarr_feats3d_t1779.py"
 SCRIPT_NAME=$(basename "$SCRIPT_PATH" .py)
 
 sbatch --job-name="$SCRIPT_NAME" <<EOF

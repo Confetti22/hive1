@@ -108,16 +108,14 @@ class SegDataset(Dataset):
         return mask[slicer]
 
 
-
-
-    def _load_vol(self,path: str,) -> torch.Tensor:
+    def _load_int_mask_vol(self,path: str,) -> torch.Tensor:
 
         """Read, down-sample, crop, return a torch tensor."""
         arr = tif.imread(path)                              # np.ndarray
         arr = np.squeeze(arr)
         arr = zoom(arr, self._down, order=0)                # nearest-neighbour
         arr = self.crop_border(arr, self._crop, self._even)      # keeps depth if 1
-        return torch.as_tensor(arr, dtype=torch.float32)            # (D,H,W) or (H,W)
+        return torch.as_tensor(arr,dtype=torch.int64)            # (D,H,W) or (H,W)
 
     def __len__(self):
         return len(self.files) 
@@ -142,14 +140,14 @@ class SegDataset(Dataset):
         self._crop   = (self.feats_avg_kernel - 1) // 2
         self._even   = (self.feats_avg_kernel % 2 == 0)
 
-        mask = self._load_vol(self.mask_files[idx])    # labels
+        mask = self._load_int_mask_vol(self.mask_files[idx])    # labels
         if self.bool_mask:
             mask = mask
         else: # for numerical mask
             mask = mask -1 # class number rearrange from 0 to N-1
 
         if self.bnd:
-            bnd  = self._load_vol(self.bnd_files[idx])   # binary boundary
+            bnd  = self._load_int_mask_vol(self.bnd_files[idx])   # binary boundary
             return feats,mask,bnd
         else:
             return feats,mask

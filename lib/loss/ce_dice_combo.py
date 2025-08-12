@@ -12,10 +12,18 @@ class FocalLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        logpt = F.log_softmax(inputs, dim=1)
+        
+        #cast idx into long to be more secure
+        logpt = F.log_softmax(inputs, dim=1)                # [N, C, ...]
         pt = torch.exp(logpt)
-        logpt = logpt.gather(1, targets.unsqueeze(1)).squeeze(1)
-        pt = pt.gather(1, targets.unsqueeze(1)).squeeze(1)
+        idx   = targets.long().unsqueeze(1)                 # [N, 1, ...] -> long
+        logpt = logpt.gather(1, idx).squeeze(1)  
+        pt = pt.gather(1, idx).squeeze(1)  
+
+        # logpt = F.log_softmax(inputs, dim=1)
+        # pt = torch.exp(logpt)
+        # logpt = logpt.gather(1, targets.unsqueeze(1)).squeeze(1)
+        # pt = pt.gather(1, targets.unsqueeze(1)).squeeze(1)
 
         loss = -1 * (1 - pt) ** self.gamma * logpt
 

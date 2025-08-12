@@ -388,38 +388,6 @@ def plot_zarr_slices(path: str | Path, n: int = 6, *, pca_rgb: bool = False, cha
     plt.show()
 
 #%%
-import zarr
-save_zarr_path1 ='/home/confetti/data/t1779/ae_feats_nissel_l3_avg8_rhemisphere.zarr'
-save_zarr_path2 ='/home/confetti/data/t1779/ae_feats_nissel_l3_avg8_rhemisphere2.zarr'
-arr1= zarr.open(str(save_zarr_path1),model='r')
-arr2= zarr.open(str(save_zarr_path2),model='r')
-slice1 = arr1[0:64,:,:,:]
-slice2 = arr2[0,:,:,:]
-print(f"{slice1.min()=}, {slice2.min()= }")
-
-import numpy as np
-import matplotlib.pyplot as plt
-from skimage.filters import threshold_otsu
-
-def get_thres_otsu(arr):
-# Compute Otsu's threshold
-    arr = arr[(arr >= -500) & (arr <= 500)]
-    thresh = threshold_otsu(arr)
-    # Plot histogram
-    plt.figure(figsize=(6, 4))
-    plt.hist(arr.ravel(), bins=256, color='gray', alpha=0.7)
-    plt.axvline(thresh, color='red', linestyle='--', linewidth=2, label=f'Otsu Threshold = {thresh:.2f}')
-    plt.title("Histogram with Otsu Threshold")
-    plt.xlabel("Pixel Value")
-    plt.ylabel("Frequency")
-    plt.legend()
-    plt.show()
-    print("Otsu Threshold:", thresh)
-
-get_thres_otsu(slice1)
-get_thres_otsu(slice2)
-
-#%%
 summarise_zarr(save_zarr_path)
 plot_zarr_slices(save_zarr_path, n=8, pca_rgb=True,channel_axis=-1)
 #%%

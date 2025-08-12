@@ -122,56 +122,6 @@ import sys
 sys.path.append("/home/confetti/e5_workspace/hive1")
 
 # %%
-from lib.datasets.simple_dataset import get_dataset
-from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
-import numpy as np
-import tifffile as tif
-import pickle
-import os
-from config.load_config import load_cfg
-from lib.arch.ae import  load_compose_encoder_dict,build_final_model
-device ='cuda'
-args = load_cfg('config/seghead.yaml')
-args.filters = [32,64]
-args.mlp_filters =[64,32,24,12]
-args.last_encoder = False
-
-exp_name ='smallestv1roi_oridfar256_10000epoch'
-feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_{exp_name}"
-os.makedirs(feats_save_dir,exist_ok=True)
-
-dataset = get_dataset(args)
-loader = DataLoader(dataset,batch_size=1,drop_last=False,shuffle=False,num_workers=0)
-E5 = False
-
-if E5:
-    data_prefix = "/share/home/shiqiz/data"
-    workspace_prefix = "/share/home/shiqiz/workspace/hive"
-else:
-    data_prefix = "/home/confetti/data"
-    workspace_prefix = '/home/confetti/e5_workspace/hive'
-
-cmpsd_model = build_final_model(args)
-cmpsd_model.eval().to(device)
-
-# the latter conv_layer parameters will not be loaded
-cnn_ckpt_pth = f'{data_prefix}/weights/rm009_3d_ae_best.pth'
-mlp_ckpt_pth =f'{data_prefix}/weights/rm009_smallestv1roi_oridfar256_l2_pool8_10000.pth'
-load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_ckpt_pth,dims=args.dims)
-
-from confettii.plot_helper import three_pca_as_rgb_image
-
-for idx, img in enumerate(tqdm(loader)):
-    feats = cmpsd_model(img.to(device))
-    feats = np.squeeze(feats.cpu().detach().numpy())
-    spatial_shape = feats.shape[1:]
-    feats_lst = np.moveaxis(feats,0,-1)
-    feats_lst = feats_lst.reshape(-1,feats.shape[0])
-    rgb_img=three_pca_as_rgb_image(feats_lst,spatial_shape) 
-    with open(f"{feats_save_dir}/{idx:04d}_feats.pkl",'wb') as f:
-        pickle.dump(feats,f)
-    tif.imwrite(f"{feats_save_dir}/{idx:04d}_rgb_feats.tif",rgb_img)
 
 
 #%%

@@ -31,15 +31,15 @@ import zarr
 # ──────────────────────────────────────────────────────────────────────────────
 from config.load_config import load_cfg
 from helper.contrastive_train_helper import (
-    cos_loss_topk,
     get_t11_eval_data,
-    MLP,
-    Contrastive_dataset_3d,
     load_checkpoint,
     save_checkpoint,
     log_layer_embeddings,
 )
 from lib.arch.ae import build_final_model, load_compose_encoder_dict
+from lib.datasets.contrastive_dataset import Contrastive_dataset_3d
+from lib.arch.mlp import MLP
+from lib.loss.cos_loss import cos_loss_topk 
 from lib.core.scheduler import WarmupCosineLR
 
 # =============================================================================
@@ -195,7 +195,7 @@ def validate(model: nn.Module, cmpsd_model: nn.Module, eval_data,
 def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
-    cfg.e5 = False 
+    cfg.e5 = True 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     sample_name ='t1779'
     # --------------- experiment folder ------------- #
@@ -241,7 +241,7 @@ def main():
     print("Registered layers:", LAYER_ORDER)
 
     # --------------- optim & sched ----------------- #
-    opt = optim.Adam(model.parameters(), lr=4e-5)
+    opt = optim.Adam(model.parameters(), lr=1e-4)
     warmup_epochs= 20
 
     sched = WarmupCosineLR(opt,warmup_epochs=warmup_epochs,max_epochs=cfg.num_epochs)

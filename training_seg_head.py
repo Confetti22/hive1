@@ -11,7 +11,9 @@ from tqdm.auto import tqdm
 
 from config.load_config import load_cfg
 from lib.arch.seg import ConvSegHead
-from train_seghead_helper import ComboLoss,accuracy,compute_class_weights_from_dataset, seg_valid
+from train_seghead_helper import accuracy, seg_valid
+from lib.loss.ce_dice_combo import ComboLoss
+from lib.utils.loss_utils import compute_class_weights_from_dataset
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
 from distance_contrast_helper import HTMLFigureLogger
 
@@ -77,7 +79,7 @@ def main():
     cfg = load_cfg(args.cfg)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    exp_name = f"level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}_smallestv1roi_postopk_nview6_focal_combo_loss" 
+    exp_name = f"continuefeats_level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}__focal_combo_loss" 
     run_dir = Path("outs") / "seg_head" / exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
