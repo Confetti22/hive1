@@ -33,8 +33,8 @@ def seg_valid(img_logger,valid_loader,seg_head,epoch,device,loss_fn):
             valid_loss.append(loss.item())
         
             top1, top3 = accuracy(logits_flat, labels_flat, topk=(1, 3))
-            total_top1.append(top1.item())
-            total_top3.append(top3.item())
+            total_top1.append(top1)
+            total_top3.append(top3)
 
             # ---------- prediction ----------
             probs = F.softmax(logits, dim=1)               # softmax over channel K

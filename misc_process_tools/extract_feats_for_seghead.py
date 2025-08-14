@@ -29,7 +29,7 @@ args.mlp_filters =[64,32,24,12]
 args.last_encoder = False
 args.avg_pool_size = [8,8,8] 
 
-exp_name ='aemlpv1_continue_e7500'
+exp_name ='aemlpv1_continue_e2500'
 feats_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_{exp_name}"
 rgb_img_save_dir = f"/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_{exp_name}/rgb_feats"
 os.makedirs(feats_save_dir,exist_ok=True)
@@ -51,7 +51,7 @@ cmpsd_model.eval().to(device)
 
 # the latter conv_layer parameters will not be loaded
 cnn_ckpt_pth = f'{data_prefix}/weights/ae_feats_nissel_v1_roi1_decaylr_e1600.pth'
-mlp_ckpt_pth =f'/home/confetti/e5_workspace/hive1/outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_7500.pth'
+mlp_ckpt_pth =f'/home/confetti/e5_workspace/hive1/outs/contrastive_run_rm009/ae_mlp_rm009_v1/continute_FEATl2_avg8_LOSSpostopk_numparis16384_batch4096_nview4_d_near6_shuffle20_cosdecay_valide_with_avgpool/checkpoints/epoch_2500.pth'
 mlp_weights_dict = torch.load(mlp_ckpt_pth)['model']
 load_compose_encoder_dict(cmpsd_model,cnn_ckpt_pth,mlp_weight_dict=mlp_weights_dict,dims=args.dims)
 #%%

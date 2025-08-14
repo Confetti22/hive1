@@ -15,6 +15,7 @@ from train_seghead_helper import accuracy, seg_valid
 from lib.loss.ce_dice_combo import ComboLoss
 from lib.utils.loss_utils import compute_class_weights_from_dataset
 from lib.datasets.dataset4seghead import get_dataset, get_valid_dataset
+from lib.core.scheduler import WarmupCosineLR
 from distance_contrast_helper import HTMLFigureLogger
 
 
@@ -61,8 +62,8 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, writer):
         train_loss.append(loss.item())
 
         top1, top3 = accuracy(logits_flat, labels_flat, topk=(1, 3))
-        total_top1.append(top1.item())
-        total_top3.append(top3.item())
+        total_top1.append(top1)
+        total_top3.append(top3)
         
 
     avg_loss = sum(train_loss) / len(train_loss)
@@ -77,9 +78,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, writer):
 def main():
     args = parse_args()
     cfg = load_cfg(args.cfg)
+    cfg.num_epochs = 1000 
+    cfg.lr_start = 1e-3
+    cfg.batch_size = 16
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    exp_name = f"continuefeats_level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}__focal_combo_loss" 
+    exp_name = f"continuefeats_e7500_level{cfg.feats_level}_avg_pool{cfg.feats_avg_kernel}__focal_combo_loss" 
     run_dir = Path("outs") / "seg_head" / exp_name
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -100,6 +104,7 @@ def main():
 
     model = ConvSegHead(cfg.in_channels, cfg.num_classes).to(device)
     optimizer = optim.Adam(model.parameters(), lr=cfg.lr_start)
+    scheduler = WarmupCosineLR(optimizer,warmup_epochs=10,max_epochs= cfg.num_epochs) 
 
     start_epoch = 0
     if args.ckpt:
@@ -108,7 +113,8 @@ def main():
 
     for epoch in range(start_epoch, cfg.num_epochs):
         avg_loss = train_one_epoch(model, loader, loss_fn, optimizer, device, epoch, writer)
-        print(f"[Epoch {epoch}] Train Loss: {avg_loss:.4f}")
+        scheduler.step()
+        print(f"[Epoch {epoch}] Train Loss: {avg_loss:.4f},lr={optimizer.param_groups[0]["lr"]:.6f}")
 
         if epoch % cfg.valid_very_epoch == 0:
             val_loss ,avg_top1, avg_top3 = seg_valid(img_logger, valid_loader, model, epoch, device=device, loss_fn=loss_fn)

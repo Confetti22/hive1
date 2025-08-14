@@ -253,12 +253,12 @@ loader         = DataLoader(dataset, batch_size=6, shuffle=True, drop_last=False
 valid_dataset  = get_valid_dataset(args,bnd=True)
 valid_loader   = DataLoader(valid_dataset, batch_size=6, shuffle=False, drop_last=False)
 
-from lib.loss.l1 import WeightedL1Loss, compute_class_weights_from_dataset
+from lib.loss.l1 import Twoclass_WeightedL1Loss, compute_class_weights_from_dataset
 
 class_weights = compute_class_weights_from_dataset(dataset, num_classes=2)
 # class_weights[0]=0.1
 # class_weights[1]=0.9
-loss_fn = WeightedL1Loss(class_weights.to(device),reduction='mean', logits=True) 
+loss_fn = Twoclass_WeightedL1Loss(class_weights.to(device),reduction='mean', logits=True) 
 # loss_fn= ComboLoss(weight_ce=1.0,
 #                       weight_dice=1.0,
 #                       smooth=1e-6,

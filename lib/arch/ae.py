@@ -65,10 +65,11 @@ def get_activation(act: str = 'relu') -> nn.Module:
 
 
 def conv_nd_norm_act(in_channels, out_channels,
-                     kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True,
+                     kernel_size=3, stride=1, padding=0, dilation=1, groups=1, bias=True,
                      dim=3, trans=False,
                      pad_mode='replicate', norm_mode='bn', act_mode='relu',
-                     return_list=False):
+                     return_list=False,
+                     output_padding = 0):
 
     assert dim in [1, 2, 3], "Only 1D, 2D, or 3D convolutions are supported"
 
@@ -86,7 +87,7 @@ def conv_nd_norm_act(in_channels, out_channels,
         padding=padding, dilation=dilation,
         groups=groups, bias=bias,
         padding_mode='zeros',  # transposed conv only supports 'zeros'
-        output_padding=1,
+        output_padding= output_padding,
     )
     else:
         Conv = [nn.Conv1d, nn.Conv2d, nn.Conv3d][dim - 1]
@@ -106,7 +107,7 @@ def conv_nd_norm_act(in_channels, out_channels,
     return layers if return_list else nn.Sequential(*layers)
 
 
-def make_block(in_ch, out_ch, ks, stride, padding, block_type, dim, trans, shared_kwargs):
+def make_block(in_ch, out_ch, ks, stride, block_type, dim, trans, shared_kwargs,padding=0,output_padding=0 ):
     def conv(in_c, out_c):
         return conv_nd_norm_act(
             in_c, out_c, ks,
@@ -114,6 +115,7 @@ def make_block(in_ch, out_ch, ks, stride, padding, block_type, dim, trans, share
             padding,
             dim=dim,
             trans=trans if in_c == in_ch else False,
+            output_padding=output_padding,
             **shared_kwargs
         )
 
@@ -127,7 +129,6 @@ def make_block(in_ch, out_ch, ks, stride, padding, block_type, dim, trans, share
 # --------------------------------------------
 #  Base AutoEncoder Class (ND)
 # --------------------------------------------
-
 class EncoderND(nn.Module):
     def __init__(self, in_channel, filters, kernel_size, dimension=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None, avg_pool_padding=False,last_encoder=True):
@@ -181,6 +182,7 @@ class EncoderND(nn.Module):
             x = pool(x)
         return x
 
+
 class DecoderND(nn.Module):
     def __init__(self, out_channel, filters, kernel_size, dimension=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double'):
@@ -217,6 +219,137 @@ class DecoderND(nn.Module):
             x = layer(x)
         x = self.conv_out(x)
         return x
+
+class EncoderND_1(nn.Module):
+    """
+    update 2025/08/14
+    Encoder with N down_layers. Downsampling per stage is controlled by `downsample_strategy`:
+      - 'conv_stride': first conv in the block has stride=2 (no padding).
+      - 'max_pool':    all convs use stride=1 (no padding), then MaxPool(k=2,s=2).
+
+    Everything (including the former conv_in and optional last 1×1 conv) is a down_layer.
+    """
+    def __init__(self, in_channel, filters, kernel_size, dims=3,
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn',
+                 block_type='double',
+                 downsample_strategy='conv_stride'):  # 'conv_stride' or 'max_pool'
+        super().__init__()
+        assert downsample_strategy in ('conv_stride', 'max_pool'), \
+            "downsample_strategy must be 'conv_stride' or 'max_pool'"
+
+        self.dim =dims 
+        self.depth = len(filters)
+        self.downsample_strategy = downsample_strategy
+
+        Pool = nn.MaxPool3d if dims== 3 else nn.MaxPool2d
+        Conv = nn.Conv3d if dims== 3 else nn.Conv2d
+
+        self.shared_kwargs = {
+            'pad_mode': pad_mode,
+            'act_mode': act_mode,
+            'norm_mode': norm_mode
+        }
+
+        self.down_layers = nn.ModuleList()
+
+        # ---- Stage 0: former conv_in, now a down_layer (single block, no padding) ----
+        k0 = kernel_size[0]
+
+        if self.downsample_strategy == 'conv_stride':
+            stage0 = make_block(in_channel, filters[0], k0, stride=2,
+                                block_type=block_type, dim=dims, trans=False,
+                                shared_kwargs=self.shared_kwargs)
+        else:
+            stage0_block = make_block(in_channel, filters[0], k0, stride=1,
+                                      block_type=block_type, dim=dims, trans=False,
+                                      shared_kwargs=self.shared_kwargs)
+            stage0 = nn.Sequential(stage0_block, Pool(kernel_size=2, stride=2))
+
+        self.down_layers.append(stage0)
+
+        # ---- Stages 1..depth-1 ----
+        for i in range(self.depth - 1):
+            ks = kernel_size[min(i + 1, len(kernel_size) - 1)]
+
+            if self.downsample_strategy == 'conv_stride':
+                block = make_block(filters[i], filters[i + 1], ks, stride=2,
+                                   block_type=block_type, dim=dims, trans=False,
+                                   shared_kwargs=self.shared_kwargs)
+                stage = block
+            else:
+                block = make_block(filters[i], filters[i + 1], ks, stride=1,
+                                   block_type=block_type, dim=dims, trans=False,
+                                   shared_kwargs=self.shared_kwargs)
+                if i == self.depth - 1 -1:
+                    stage = block
+                else:
+                    stage = nn.Sequential(block, Pool(kernel_size=2, stride=2))
+
+            self.down_layers.append(stage)
+
+
+    def forward(self, x):
+        for layer in self.down_layers:
+            x = layer(x)
+        return x
+
+
+class DecoderND_1(nn.Module):
+    """
+    Decoder with upsampling via ConvTranspose (stride=2), no padding anywhere.
+    All stages (including the final out stage) are appended to self.up_layers.
+    """
+    def __init__(self, out_channel, filters, kernel_size, dims=3,
+                 pad_mode='reflect', act_mode='elu', norm_mode='gn',
+                 block_type='double',output_padding =0):
+        super().__init__()
+        self.dim = dims
+        self.depth = len(filters)
+
+        ConvTrans = nn.ConvTranspose3d if dims == 3 else nn.ConvTranspose2d
+
+        self.shared_kwargs = {
+            'pad_mode': pad_mode,
+            'act_mode': act_mode,
+            'norm_mode': norm_mode
+        }
+
+        self.up_layers = nn.ModuleList()
+
+        # Stages: depth-1 .. 1 (each: TConv stride=2 (no padding) + optional convs stride=1)
+        for i in reversed(range(self.depth - 1)):
+            ks = kernel_size[min(i + 1, len(kernel_size) - 1)]
+            block = make_block(
+                filters[i + 1], filters[i],
+                ks,                    # kernel size
+                stride=2,        # upsample here
+                block_type=block_type,
+                dim=dims,
+                trans=True,            # first conv is transposed conv
+                output_padding=output_padding,
+                shared_kwargs=self.shared_kwargs
+            )
+            self.up_layers.append(block)
+
+        # Final out stage as an up_layer (ConvTranspose to out_channel, no padding)
+        block = make_block(
+                filters[0], out_channel,
+                kernel_size[0],                    # kernel size
+                stride=2,        # upsample here
+                block_type=block_type,
+                dim=dims,
+                trans=True,            # first conv is transposed conv
+                output_padding=1,
+                shared_kwargs=self.shared_kwargs
+            )
+        self.up_layers.append(block)
+    def forward(self, x):
+        for layer in self.up_layers:
+            x = layer(x)
+        return x
+
+
+
     
 
 class BaseAutoEncoderND(nn.Module):
@@ -233,14 +366,35 @@ class BaseAutoEncoderND(nn.Module):
         x = self.decoder(x)
         return x
 
+class BaseAutoEncoderND_1(nn.Module):
+    def __init__(self, in_channel, out_channel, filters, kernel_size, dims,
+                 pad_mode='reflect', act_mode='elu', norm_mode='none', block_type='single',downsample_strategy='max_pool'):
+        super().__init__()
+        self.encoder = EncoderND_1(in_channel, filters, kernel_size, dims,
+                                 pad_mode, act_mode, norm_mode, block_type,downsample_strategy)
+        self.decoder = DecoderND_1(out_channel, filters, kernel_size, dims,
+                                 pad_mode, act_mode, norm_mode, block_type)
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
 class AutoEncoder3D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
         super().__init__(dimension=3, **kwargs)
+
+class AutoEncoder3D_1(BaseAutoEncoderND_1):
+    def __init__(self, **kwargs):
+        super().__init__(dims=3 ,**kwargs)
+
+
 
 
 class AutoEncoder2D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
         super().__init__(dimension=2, **kwargs)
+
 
 # --------------------------------------------
 # MLP 
@@ -264,11 +418,10 @@ class MLP(nn.Module):
         x = self.layers[-1](x)  # Last layer, no activation
         return x / x.norm(p=2, dim=-1, keepdim=True)
 
-
 ## 1*1 conv version of the above MLP
 
 class ConvMLP(nn.Module):
-    def __init__(self, filters=[24, 18, 12, 8], dims=2):
+    def __init__(self, filters=[24, 18, 12, 8], dims=2,l2_norm=True):
         super(ConvMLP, self).__init__()
 
         assert dims in [2, 3], "dims must be 2 or 3"
@@ -281,6 +434,7 @@ class ConvMLP(nn.Module):
         self.layers = nn.ModuleList(layers)
         self.relu = nn.ReLU()
         self.dims = dims  # Save dims for later use (e.g., normalization)
+        self.l2_norm = l2_norm
 
     def forward(self, x):
         for layer in self.layers[:-1]:
@@ -288,7 +442,8 @@ class ConvMLP(nn.Module):
         x = self.layers[-1](x)  # Last layer, no activation
 
         # L2 normalization across channel dim
-        x = x / x.norm(p=2, dim=1, keepdim=True)
+        if self.l2_norm:
+            x = x / x.norm(p=2, dim=1, keepdim=True)
         return x
 
 class ComposedModel(nn.Module):
@@ -311,6 +466,7 @@ class ComposedModel(nn.Module):
 MODEL_MAP = {
     'ae2': AutoEncoder2D,
     'ae3': AutoEncoder3D,
+    'ae3_1': AutoEncoder3D_1,
     'encoder':EncoderND,
 }
 
@@ -372,6 +528,48 @@ def build_final_model(args):
         'last_encoder': args.last_encoder,
     }
     model = ComposedModel(**kwargs)
+    return model
+
+
+class semantic_seg(nn.Module):
+    def __init__(self, in_channel,out_channel,filters, kernel_size,dims,mlp_filters, 
+                pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',downsample_strategy='max_pool'):
+        super().__init__()
+        kwargs ={
+            'in_channel': in_channel, 
+            'out_channel': out_channel,
+            'filters':filters, 
+            'kernel_size': kernel_size, 
+            'dims':dims,                 
+            'pad_mode':pad_mode, 
+            'act_mode':act_mode,
+            'norm_mode':norm_mode, 
+            'block_type':block_type,
+            'downsample_strategy': downsample_strategy,
+        }
+        self.cnn_module = BaseAutoEncoderND_1(**kwargs)
+        self.mlp_module = ConvMLP(mlp_filters,dims,l2_norm=False)
+
+    def forward(self, x):
+        cnn_out = self.cnn_module(x) # B*C*H*W --> B*H*W*C --> (B*H*W)*C
+        mlp_out = self.mlp_module(cnn_out)
+        return cnn_out,mlp_out
+
+def build_semantic_seg_model(args):
+    kwargs = {
+        'in_channel': args.in_channel,
+        'out_channel': args.out_channel,
+        'filters': args.filters,
+        'kernel_size': args.kernel_size,
+        'pad_mode': args.pad_mode,
+        'act_mode': args.act_mode,
+        'norm_mode': args.norm_mode,
+        'block_type': args.block_type,
+        'dims':args.dims,
+        'mlp_filters':args.mlp_filters,
+        'downsample_strategy': args.downsample_strategy,
+    }
+    model = semantic_seg(**kwargs)
     return model
     
 

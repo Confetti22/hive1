@@ -1,0 +1,74 @@
+#save_dir
+exp_name : "test_semantaic_seg_fcn" #exp_name used to distinguish each run
+exp_save_dir: "outs/cortex_semantic_seg"
+
+# system:
+e5: False 
+device: cuda
+gpu_ids: 0
+num_gpus: 1
+num_cpus: 2
+
+# model:
+#______for fcn encoder and decoder_____ 
+dims : 3
+model_name: ae3_1
+architecture: ae
+block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
+filters: [32,64,96]  # filters number can not be the same consecutively
+kernel_size: [3,3,3]
+in_channel: 1
+out_channel: 16  #for last channel of decoder
+pad_mode: 'reflect'
+act_mode: 'elu'
+norm_mode: 'none'
+downsample_strategy: 'conv_stride'
+
+#_______for 1*1 seg_head____ 
+#mlp_filters: the first one equals to the out_channel, and the last one equals to num_calss
+mlp_filters: [16,8]  
+mlp_apply_l2_norm : False
+
+# loss:
+loss_name: l1 # for ae reconstruction loss 
+tv_loss: True
+
+# trainer:
+trainer_name: 'trainer' #trainer to choose
+save_every: 50 #save frequency
+epochs: 800 
+valid_very_epoch: 20
+save_very_epoch: 50
+fp16: false 
+
+# solver:
+optimizer: "adam"
+lr_scheduler_name: "decay"
+lr_start: 1e-3
+lr_warmup: 20
+
+# dataset:
+dataset_name: 'dataset4seghead'
+batch_per_gpu: 4 
+num_workers: 0
+shuffle: true
+
+feats_level: False
+feats_avg_kernel: False
+
+
+data_path_dir : "/home/confetti/data/rm009/boundary_seg/rois"
+mask_path_dir : "/home/confetti/data/rm009/boundary_seg/layer_masks"
+bnd_path_dir : "/home/confetti/data/rm009/boundary_seg/bnd_masks"
+valid_data_path_dir : "/home/confetti/data/rm009/boundary_seg/valid_rois"
+valid_mask_path_dir : "/home/confetti/data/rm009/boundary_seg/layer_valid_masks"
+valid_bnd_path_dir : "/home/confetti/data/rm009/boundary_seg/valid_bnd_masks"
+
+e5_data_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/rois"
+e5_mask_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/layer_masks"
+e5_bnd_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/bnd_masks"
+e5_valid_data_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/valid_rois"
+e5_valid_mask_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/layer_valid_masks"
+e5_valid_bnd_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/valid_bnd_masks"
+
+

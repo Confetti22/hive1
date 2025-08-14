@@ -19,7 +19,7 @@ import numpy as np
 from typing import Tuple
 
 class SegDataset(Dataset):
-    def __init__(self, args,valid=False,use_ratio = 1,bnd=False,bool_mask=False):
+    def __init__(self, args,valid=False,use_ratio = 1,bnd=False,bool_mask=False,crop_roi = False):
         """
         for 3d feats volume and corresponding mask
         amount : control the amount of data for training
@@ -33,8 +33,8 @@ class SegDataset(Dataset):
         self.valid_mask_path = args.e5_valid_mask_path_dir if self.e5 else args.valid_mask_path_dir
 
         self.valid = valid
-        self.feats_level = args.feats_level
-        self.feats_avg_kernel = args.feats_avg_kernel
+        self.feats_level = args.feats_level if args.feats_level else None
+        self.feats_avg_kernel = args.feats_avg_kernel if args.feats_avg_kernel else None
 
         # Determine the file path to use (training or validation)
         current_data_path = self.valid_data_path if self.valid else self.data_path
@@ -42,6 +42,7 @@ class SegDataset(Dataset):
 
         self.bnd =bnd
         self.bool_mask = bool_mask
+        self.crop_roi = crop_roi
         if bnd:
             self.bnd_path = args.e5_bnd_path_dir if self.e5 else args.bnd_path_dir
             self.valid_bnd_path = args.e5_valid_bnd_path_dir if self.e5 else args.valid_bnd_path_dir
@@ -74,6 +75,7 @@ class SegDataset(Dataset):
         self.files  = self.files[:int(use_ratio*len(self.files))]
         self.mask_files  = self.masks_files[:int(use_ratio*len(self.masks_files))]
         print(f"######init simple_dataset with amount ={use_ratio}, len of datset is {len(self.files)}#####")
+        print(f"{current_data_path= },{current_mask_path= }")
     
 
     def crop_border(self,mask: np.ndarray, crop_size: int, even_kernel: bool) -> np.ndarray:
@@ -113,8 +115,10 @@ class SegDataset(Dataset):
         """Read, down-sample, crop, return a torch tensor."""
         arr = tif.imread(path)                              # np.ndarray
         arr = np.squeeze(arr)
-        arr = zoom(arr, self._down, order=0)                # nearest-neighbour
-        arr = self.crop_border(arr, self._crop, self._even)      # keeps depth if 1
+        if self._down:
+            arr = zoom(arr, self._down, order=0)                # nearest-neighbour
+        if self._crop:
+            arr = self.crop_border(arr, self._crop, self._even)      # keeps depth if 1
         return torch.as_tensor(arr,dtype=torch.int64)            # (D,H,W) or (H,W)
 
     def __len__(self):
@@ -130,15 +134,23 @@ class SegDataset(Dataset):
                 arr = pickle.load(f)            # numpy array shape (C,D,H,W)
         elif suffix in {".tif", ".tiff"}:
             arr = tif.imread(fname)            # (D,H,W) or (Z,H,W)
-            arr = np.expand_dims(arr,0)
+            if self.crop_roi:
+                arr = arr[6:-6]
+            arr = np.expand_dims(arr,0) #add channel dim
+            
         else:
             raise ValueError(f"Unsupported file type: {fname}")
         feats  = torch.from_numpy(arr).float()
 
 
-        self._down   = 1 / (2 ** self.feats_level)
-        self._crop   = (self.feats_avg_kernel - 1) // 2
-        self._even   = (self.feats_avg_kernel % 2 == 0)
+        
+        self._down = None
+        self._crop = None 
+        self._even = None
+        if self.feats_level:
+            self._down   = 1 / (2 ** self.feats_level)
+            self._crop   = (self.feats_avg_kernel - 1) // 2
+            self._even   = (self.feats_avg_kernel % 2 == 0)
 
         mask = self._load_int_mask_vol(self.mask_files[idx])    # labels
         if self.bool_mask:
@@ -153,17 +165,17 @@ class SegDataset(Dataset):
             return feats,mask
 
 
-def get_dataset(args,bnd=False,bool_mask=False):
+def get_dataset(args,bnd=False,bool_mask=False,crop_roi = False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args, use_ratio=1,bnd=bnd,bool_mask=bool_mask)
+    train_dataset = SegDataset(args, use_ratio=1,bnd=bnd,bool_mask=bool_mask,crop_roi= crop_roi)
 
     return train_dataset
 
-def get_valid_dataset(args,bnd=False,bool_mask = False):
+def get_valid_dataset(args,bnd=False,bool_mask = False,crop_roi = False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args,valid=True,use_ratio =1,bnd=bnd,bool_mask=bool_mask)
+    train_dataset = SegDataset(args,valid=True,use_ratio =1,bnd=bnd,bool_mask=bool_mask,crop_roi = crop_roi)
 
     return train_dataset
 

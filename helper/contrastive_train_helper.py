@@ -483,7 +483,7 @@ def log_layer_embeddings(
     tsne_kwargs=None,
     umap_kwargs=None,
     dpi=300, ext='png',
-    valid_img_id = 0,
+    valid_img_idx = -1,
 
 ):
     """
@@ -518,32 +518,27 @@ def log_layer_embeddings(
             continue
 
         # you stored single tensor per key; if you still store list use [-1]
-        out_t = FEATURE_STORE[k][-1] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
+        out_t = FEATURE_STORE[k][valid_img_idx] if isinstance(FEATURE_STORE[k], (list, tuple)) else FEATURE_STORE[k]
 
         feat = out_t.detach().cpu().squeeze().numpy()  # could be [D,H,W,C], [H,W,C], [C,D,H,W], or [C,H,W]
 
         # --- Normalize to channel-last; if 4D, also standardize to [D,H,W,C] ---
         if feat.ndim == 4:
-            # if first dim isn't depth (i.e., not equal to label D), assume [C,D,H,W] and move channel to last
-            if feat.shape[0] != label_volume.shape[0]:
-                # [C,D,H,W] -> [D,H,W,C]
-                feat = np.moveaxis(feat, 0, -1)
-            # now feat is [D,H,W,C]
+            # [C,D,H,W] -> [D,H,W,C]
+            feat = np.moveaxis(feat, 0, -1)
             feat2d = feat[feat.shape[0] // 2]  # mid-slice -> [H,W,C]
-
         elif feat.ndim == 3:
-            # Either [H,W,C] (OK) or [C,H,W] (make channel-last)
-            # if feat.shape[0] not in (label_volume.shape[0],) and feat.shape[0] <= 128 and feat.shape[1] == label_volume.shape[1]:
-            if feat.shape[0] not in (label_volume.shape[0],) :
-                # heuristic: likely [C,H,W] -> [H,W,C]
-                feat = np.moveaxis(feat, 0, -1)
-            # now feat is [H,W,C]
+            # [C,H,W] -> [H,W,C]
+            feat = np.moveaxis(feat, 0, -1)
             feat2d = feat
         else:
             raise ValueError(f"Unexpected feature shape for {k}: {feat.shape}")
 
         # pick label mid-slice (features are 2D now)
-        lbl2d = label_volume[label_volume.shape[0] // 2]  # [H,W]
+        if label_volume.shape[0] !=1:
+            lbl2d = label_volume[label_volume.shape[0] // 2]  # [H,W]
+        else:
+            lbl2d = np.squeeze(label_volume)
         lbl2d = lbl2d.astype(np.int8)
 
         # if min==0, then the background is 0
@@ -574,7 +569,7 @@ def log_layer_embeddings(
         tsne_encoded_feats_lst,
         tsne_label_lst,
         writer,
-        tag=f"embed_grid{valid_img_id}",
+        tag=f"embed_grid{valid_img_idx}",
         step=epoch,
         tag_list=plot_tag_lst,
         mode=mode,
@@ -588,7 +583,7 @@ def log_layer_embeddings(
     plot_pca_maps(
         pca_img_lst,
         writer=writer,
-        tag=f"pca{valid_img_id}",
+        tag=f"pca{valid_img_idx}",
         step=epoch,
         ncols=len(pca_img_lst),
     )

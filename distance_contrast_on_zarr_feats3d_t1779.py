@@ -129,7 +129,7 @@ def valid_from_roi(model, epoch, eval_data, writer):
             mode="both",                   # <- t-SNE + UMAP stacked
             tsne_kwargs=dict(perplexity=20),
             umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
-            valid_img_id =idx,
+            valid_img_idx =idx,
         )
         
 

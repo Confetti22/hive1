@@ -63,10 +63,10 @@ mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg/masks"
 valid_data_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/l2_pool8_aemlpv1_continue_e7500"
 valid_mask_path_dir: "/home/confetti/data/rm009/v1_roi1_seg_valid/masks"
 
-e5_data_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg/l2_pool8_aemlpv1_continue_e7500"
-e5_mask_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg/masks"
-e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg_valid/l2_pool8_aemlpv1_continue_e7500"
-e5_valid_mask_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg_valid/masks"
+# e5_data_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg/l2_pool8_aemlpv1_continue_e7500"
+# e5_mask_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg/masks"
+# e5_valid_data_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg_valid/l2_pool8_aemlpv1_continue_e7500"
+# e5_valid_mask_path_dir: "/share/home/shiqiz/data/rm009/v1_roi1_seg_valid/masks"
 
 
 

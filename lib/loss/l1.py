@@ -20,7 +20,7 @@ def get_loss(args):
 
 
 
-class WeightedL1Loss(nn.Module):
+class Twoclass_WeightedL1Loss(nn.Module):
     """
     Pixel-wise L1 loss with per-class weights.
 

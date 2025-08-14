@@ -1,5 +1,6 @@
 
 import torch.nn as nn
+from .ae import AutoEncoder3D_1,ConvMLP 
 
 class SegmentationHead(nn.Module):
     def __init__(self, in_features, num_classes):
@@ -30,3 +31,5 @@ class ConvSegHead(nn.Module):
     def forward(self, x):
         # x shape: [B, C, D, H, W]
         return self.net(x)  # logits per class
+
+
