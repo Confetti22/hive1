@@ -6,6 +6,7 @@ import numpy as np
 import random
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
@@ -18,7 +19,7 @@ from helper.contrastive_train_helper import log_layer_embeddings
 
 from functools import partial
 from lib.core.metric import accuracy
-from lib.loss.tv import TVLoss
+
 from torchsummary import summary
 import math
 
@@ -35,10 +36,14 @@ LAYER_ORDER   = []
 
 def _hook(layer_name, module, inp, out):
     """
+    Hook to store output features. Only records when model is in eval mode.
     out : Tensor shape [B, C, D, H, W] or [B, C, H, W]
-    We keep it on CPU to avoid GPU memory churn.
     """
-    FEATURE_STORE[layer_name].append(out.detach().cpu())
+    if module.training:
+        return  # Skip during training
+
+    if len(FEATURE_STORE[layer_name]) < 3:
+        FEATURE_STORE[layer_name].append(out.detach().cpu())
 
 def register_hooks(model, prefix=""):
     """
@@ -53,6 +58,42 @@ def register_hooks(model, prefix=""):
             HOOK_HANDLES.append(m.register_forward_hook(partial(_hook, full_name)))
         else:
             register_hooks(m, f"{full_name}.")
+
+class TVLoss(nn.Module):
+    def __init__(self, TVLoss_weight=1.0):
+        super(TVLoss, self).__init__()
+        self.TVLoss_weight = TVLoss_weight
+
+    def forward(self, x):
+        # Input shape: (B, C, H, W) or (B, C, D, H, W)
+        # avoid D==1
+        batch_size = x.size(0)
+        spatial_dims = x.dim() - 2  # Number of spatial dims (2 for 2D, 3 for 3D)
+        tv = 0.0
+
+        if spatial_dims == 2:
+            # (B, C, H, W)
+            h_tv = torch.pow(x[:, :, 1:, :] - x[:, :, :-1, :], 2).sum()
+            w_tv = torch.pow(x[:, :, :, 1:] - x[:, :, :, :-1], 2).sum()
+            count_h = self._tensor_size(x[:, :, 1:, :])
+            count_w = self._tensor_size(x[:, :, :, 1:])
+            tv = (h_tv / count_h + w_tv / count_w)
+        elif spatial_dims == 3:
+            # (B, C, D, H, W)
+            d_tv = torch.pow(x[:, :, 1:, :, :] - x[:, :, :-1, :, :], 2).sum()
+            h_tv = torch.pow(x[:, :, :, 1:, :] - x[:, :, :, :-1, :], 2).sum()
+            w_tv = torch.pow(x[:, :, :, :, 1:] - x[:, :, :, :, :-1], 2).sum()
+            count_d = self._tensor_size(x[:, :, 1:, :, :])
+            count_h = self._tensor_size(x[:, :, :, 1:, :])
+            count_w = self._tensor_size(x[:, :, :, :, 1:])
+            tv = (d_tv / count_d + h_tv / count_h + w_tv / count_w)
+        else:
+            raise ValueError("Unsupported input dimensions. Expected 4D or 5D input.")
+
+        return self.TVLoss_weight * 2 * tv / batch_size
+
+    def _tensor_size(self, t):
+        return t.numel()
 
 
 def print_load_result(load_result):
@@ -82,7 +123,7 @@ def bnd_seg_valid(img_logger, valid_loader, seg_model,epoch,visualize_first_batc
         for idx ,(inputs, targets) in enumerate(tqdm(valid_loader)):
             inputs, targets = inputs.to(device),targets.to(device)
 
-            logits = seg_model(inputs)          # NEW
+            bottle_neck,cnn_out,logits = seg_model(inputs)          # NEW
             mask = targets >=0
             #targets is the middle slice of the 3d output, so take the middle slice of the output
             logits_channel_last =  logits.permute(0, 2, 3, 4, 1) #B,D,H,W,C
@@ -91,7 +132,7 @@ def bnd_seg_valid(img_logger, valid_loader, seg_model,epoch,visualize_first_batc
             logits_flat = logits_middle_slice[mask]
             targets_flat = targets[mask]
 
-            loss = loss_fn(logits_flat, targets_flat)
+            loss = supervised_loss_fn(logits_flat, targets_flat)
             
             valid_loss.append(loss.item())
 
@@ -100,13 +141,13 @@ def bnd_seg_valid(img_logger, valid_loader, seg_model,epoch,visualize_first_batc
             total_top3.append(top3)
 
             # ---------- prediction ----------
-            if (visualize_first_batch and idx ==0) or not visualize_first_batch:
+            if (visualize_first_batch and idx ==2) or not visualize_first_batch:
                 probs = F.softmax(logits_middle_slice, dim=-1)               # softmax over channel K
                 pred  = torch.argmax(probs, dim=-1) + 1         # [B,D,H,W], +1 keeps 0 for ignore
                 pred  = pred * mask
                             # ---------- move to CPU once ----------
-                pred_np  = pred.cpu().numpy()                  # [B,D,H,W]
-                label_np = (targets + 1).cpu().numpy() 
+                pred_np  = pred.cpu().numpy()                # [B,D,H,W]
+                label_np = (targets + 1).cpu().numpy()
 
                 # one 2-D slice per sample
                 gt_maskes.extend(label_np)
@@ -167,15 +208,22 @@ train_img_logger= HTMLFigureLogger(args.exp_save_dir + '/' + args.exp_name, html
 
 seg_model= build_semantic_seg_model(args).to(device)
 seg_model = seg_model
-cpkt = torch.load('outs/seg_bnd/semantic_seg/model_epoch_100.pth')
-load_result = seg_model.load_state_dict(cpkt['seg_model'])
-print(f"{load_result=}")
-# print(seg_model)
-# summary(seg_model,(1,20,1024,1024))
 
-register_hooks(seg_model.cnn_module.decoder.up_layers[2],'seghead.last_cnn')
-register_hooks(seg_model.mlp_module, "seghead.mlp")  # you can add cnn if needed
-print("Registered layers:", LAYER_ORDER)
+cpkt = torch.load('outs/cortex_semantic_seg/with_tvloss_lambda1e-5/model_epoch_50.pth')
+load_result = seg_model.load_state_dict(cpkt['seg_model'])
+print("\n\n")
+print(f"{load_result=}")
+
+print(seg_model)
+summary(seg_model,(1,20,512,512))
+exit(0)
+
+start_epoch = 0 
+
+if args.tsne_emb:
+    register_hooks(seg_model.cnn_module.decoder.up_layers[2],'seghead.last_cnn')
+    register_hooks(seg_model.mlp_module, "seghead.mlp")  # you can add cnn if needed
+    print("Registered layers:", LAYER_ORDER)
 
 seg_model.train()
 
@@ -187,28 +235,41 @@ scheduler = WarmupCosineLR(optimizer,args.lr_warmup,args.epochs)
 
 # %% ---------- data loaders & loggers (unchanged) -----------------------------
 
+train_batch_size =1
+VALID_BATCH_SIZE = 1 #set batch_size of valid_loader ==1 to make sure each item in feature_store is from one image 
 dataset        = get_dataset(args,bnd=False,bool_mask=False,crop_roi=True)
-loader         = DataLoader(dataset, batch_size=2, shuffle=True, drop_last=False)
+train_loader   = DataLoader(dataset, batch_size=train_batch_size, shuffle=True, drop_last=False)
 valid_dataset  = get_valid_dataset(args,bnd=False,bool_mask=False,crop_roi =True)
+valid_loader   = DataLoader(valid_dataset, batch_size=VALID_BATCH_SIZE, shuffle=False, drop_last=False)
 
-#set batch_size of valid_loader ==1 to make sure each item in feature_store is from one image 
-valid_loader   = DataLoader(valid_dataset, batch_size=1, shuffle=False, drop_last=False)
+from lib.datasets.simple_dataset import get_dataset as simple_get_dataset
+from lib.datasets.simple_dataset import get_valid_dataset as simple_get_valid_dataset
+temp_conf=args.copy()
+temp_conf.data_path_dir = '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+temp_conf.e5_data_path_dir = '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+temp_conf.valid_data_path_dir = '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'
+temp_conf.e5_valid_data_path_dir = '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+low_recon_targets = simple_get_dataset(temp_conf)
+valid_low_recon_targets = simple_get_valid_dataset(temp_conf)
+recon_target_loader = DataLoader(low_recon_targets, batch_size=train_batch_size, shuffle=True, drop_last=False)
+
+
 
 #~~~~~~~ weighted l1 loss ~~~~~~~~#
 from lib.loss.ce_dice_combo import ComboLoss
 from lib.utils.loss_utils import compute_class_weights_from_dataset
 class_weights = compute_class_weights_from_dataset(dataset, args.mlp_filters[-1])
-loss_fn = ComboLoss(class_weights=class_weights, focal=args.get("use_focal", True))
+supervised_loss_fn = ComboLoss(class_weights=class_weights, focal=args.get("use_focal", True))
+tv_loss_fn = TVLoss(TVLoss_weight=1e-2)
 
-start_epoch = 80 
 # %% ---------- training loop --------------------------------------------------
 for epoch in tqdm(range(start_epoch,args.epochs)):
     train_loss = []
     total_top1 = []
-    for inputs, targets in loader:
-        inputs, targets = inputs.to(device), targets.to(device)
+    for inputs, targets,recon_target in train_loader:
+        inputs, targets, recon_target= inputs.to(device), targets.to(device), recon_target.to(device)
         optimizer.zero_grad()
-        cnn_out,logits = seg_model(inputs)          
+        bottle_necks,cnn_outs,logits = seg_model(inputs)          
 
         mask = targets >=0
         #targets is the middle slice of the 3d output, so take the middle slice of the output
@@ -218,12 +279,19 @@ for epoch in tqdm(range(start_epoch,args.epochs)):
         logits_flat = logits_middle_slice[mask]
         targets_flat = targets[mask]
 
-        loss = loss_fn(logits_flat, targets_flat)
+        loss = supervised_loss_fn(logits_flat, targets_flat)
         
         #unsepervised tv_loss
         if args.tv_loss:
-            tv_loss  = TVloss(cnn_out) 
+            # logits (B,C,D,H,W)
+            probs = F.softmax(logits,dim=1)
+            tv_loss  = tv_loss_fn(probs) 
             loss    += tv_loss
+        if args.recon_loss:
+            reconed    =  decoder(bottle_necks)
+            recon_loss =  recon_loss_fn(reconed,recon_target)
+            loss      +=  recon_loss
+            
 
         loss.backward()
         optimizer.step()
@@ -242,25 +310,30 @@ for epoch in tqdm(range(start_epoch,args.epochs)):
     
     if epoch % args.valid_very_epoch == 0:
         val_loss ,avg_top1, avg_top3  = bnd_seg_valid(img_logger, valid_loader, seg_model, epoch=epoch ,visualize_first_batch=True)
-        random_indexs = random.sample(range(0, len(valid_dataset)), 3)
-        print(f"begin valid, {len(valid_dataset)= },len of feature_dict={FEATURE_STORE[LAYER_ORDER[0]]}")
-        for index in random_indexs:
-            _,valid_volume = valid_dataset[index]
-            valid_volume = valid_volume.numpy()
-            log_layer_embeddings(
-                FEATURE_STORE,
-                writer=writer,
-                epoch=epoch,
-                label_volume=valid_volume,  # numpy array
-                layer_order=LAYER_ORDER,       # from hook registration
-                max_layers=12,
-                mode="both",                   # <- t-SNE + UMAP stacked
-                tsne_kwargs=dict(perplexity=20),
-                umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
-                valid_img_idx=index,
-            )
 
+        if args.tsne_emb:
+            # random_indexs = random.sample(range(0, len(valid_dataset)), 3)
+
+            random_indexs =(0,1,2)
+            print(f"begin valid, {len(valid_dataset)= },len of feature_dict={len(FEATURE_STORE[LAYER_ORDER[0]])}")
+
+            for index in random_indexs:
+                _,valid_volume = valid_dataset[index]
+                valid_volume = valid_volume.numpy()
+                log_layer_embeddings(
+                    FEATURE_STORE,
+                    writer=writer,
+                    epoch=epoch,
+                    label_volume=valid_volume,  # numpy array
+                    layer_order=LAYER_ORDER,       # from hook registration
+                    max_layers=12,
+                    mode="both",                   # <- t-SNE + UMAP stacked
+                    tsne_kwargs=dict(perplexity=20),
+                    umap_kwargs=dict(n_neighbors=30, min_dist=0.05,random_state=42,),
+                    valid_img_idx=index,
+                )
         FEATURE_STORE.clear()
+
 
         writer.add_scalar("Loss/valid", val_loss, epoch)
         writer.add_scalar("top1_acc/valid", avg_top1, epoch)
@@ -268,8 +341,9 @@ for epoch in tqdm(range(start_epoch,args.epochs)):
 
 
 
-    if (epoch % (4 * args.valid_very_epoch)) == 0:
-        bnd_seg_valid(train_img_logger, loader, seg_model,  epoch,visualize_first_batch=True)
+    if (epoch % ( args.valid_very_epoch)) == 0:
+        bnd_seg_valid(train_img_logger, train_loader, seg_model,  epoch,visualize_first_batch=True)
+        FEATURE_STORE.clear()
 
     if (epoch + 1) % 50 == 0:
         save_path = os.path.join(model_save_dir, f'model_epoch_{epoch+1}.pth')

@@ -376,9 +376,9 @@ class BaseAutoEncoderND_1(nn.Module):
                                  pad_mode, act_mode, norm_mode, block_type)
 
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+        x1 = self.encoder(x)
+        x2 = self.decoder(x1)
+        return x1,x2
 
 class AutoEncoder3D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
@@ -421,7 +421,7 @@ class MLP(nn.Module):
 ## 1*1 conv version of the above MLP
 
 class ConvMLP(nn.Module):
-    def __init__(self, filters=[24, 18, 12, 8], dims=2,l2_norm=True):
+    def __init__(self, filters=[24, 18, 12, 8], dims=2,l2_norm=True,last_act=False):
         super(ConvMLP, self).__init__()
 
         assert dims in [2, 3], "dims must be 2 or 3"
@@ -435,11 +435,15 @@ class ConvMLP(nn.Module):
         self.relu = nn.ReLU()
         self.dims = dims  # Save dims for later use (e.g., normalization)
         self.l2_norm = l2_norm
+        self.last_act = last_act
 
     def forward(self, x):
         for layer in self.layers[:-1]:
             x = self.relu(layer(x))
         x = self.layers[-1](x)  # Last layer, no activation
+
+        if self.last_act:
+            x = self.relu(x)
 
         # L2 normalization across channel dim
         if self.l2_norm:
@@ -551,9 +555,9 @@ class semantic_seg(nn.Module):
         self.mlp_module = ConvMLP(mlp_filters,dims,l2_norm=False)
 
     def forward(self, x):
-        cnn_out = self.cnn_module(x) # B*C*H*W --> B*H*W*C --> (B*H*W)*C
+        bottle_neck,cnn_out = self.cnn_module(x) # B*C*H*W --> B*H*W*C --> (B*H*W)*C
         mlp_out = self.mlp_module(cnn_out)
-        return cnn_out,mlp_out
+        return bottle_neck,cnn_out,mlp_out
 
 def build_semantic_seg_model(args):
     kwargs = {

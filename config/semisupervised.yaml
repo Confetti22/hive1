@@ -1,5 +1,5 @@
 #save_dir
-exp_name : "test_semantaic_seg_fcn" #exp_name used to distinguish each run
+exp_name : "test_tv_loss_result" #exp_name used to distinguish each run
 exp_save_dir: "outs/cortex_semantic_seg"
 
 # system:
@@ -35,17 +35,19 @@ tv_loss: True
 
 # trainer:
 trainer_name: 'trainer' #trainer to choose
-save_every: 50 #save frequency
-epochs: 800 
-valid_very_epoch: 20
-save_very_epoch: 50
+save_every: 20 #save frequency
+epochs: 300 
+valid_very_epoch: 5
+save_very_epoch: 20
 fp16: false 
+
+tsne_emb: True 
 
 # solver:
 optimizer: "adam"
 lr_scheduler_name: "decay"
-lr_start: 1e-3
-lr_warmup: 20
+lr_start: 1e-4
+lr_warmup: 2
 
 # dataset:
 dataset_name: 'dataset4seghead'
@@ -64,6 +66,9 @@ valid_data_path_dir : "/home/confetti/data/rm009/boundary_seg/valid_rois"
 valid_mask_path_dir : "/home/confetti/data/rm009/boundary_seg/layer_valid_masks"
 valid_bnd_path_dir : "/home/confetti/data/rm009/boundary_seg/valid_bnd_masks"
 
+recon_target_dir: '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+valid_recon_target_dir: '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'
+
 e5_data_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/rois"
 e5_mask_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/layer_masks"
 e5_bnd_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/bnd_masks"
@@ -71,4 +76,5 @@ e5_valid_data_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/valid_rois"
 e5_valid_mask_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/layer_valid_masks"
 e5_valid_bnd_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/valid_bnd_masks"
 
-
+e5_recon_target_dir: '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+e5_valid_recon_target_dir :  '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'

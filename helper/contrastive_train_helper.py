@@ -136,6 +136,19 @@ def plot_pca_maps(
 
     # Log to TensorBoard
     writer.add_figure(tag, fig, global_step=step)
+
+            # --- save to disk (optional) ---
+    save_parent_dir = Path(writer.log_dir).resolve()
+    save_dir = save_parent_dir/'valid_imgs'
+
+    if save_dir is not None:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{tag}_step{step}.png"
+        fig.savefig(save_dir / fname, dpi=300, bbox_inches='tight')
+        # optional: print or log path
+        print(f"Saved figure to {save_dir / fname}")
+
+    writer.add_figure(tag, fig, global_step=step)
     plt.close(fig)
 
 
@@ -458,7 +471,7 @@ def umap_tsne_grid_plot(
     plt.tight_layout()
 
         # --- save to disk (optional) ---
-    save_parent_dir = Path(writer.log_dir).resolve().parent
+    save_parent_dir = Path(writer.log_dir).resolve()
     save_dir = save_parent_dir/'valid_imgs'
 
     if save_dir is not None:
@@ -484,6 +497,7 @@ def log_layer_embeddings(
     umap_kwargs=None,
     dpi=300, ext='png',
     valid_img_idx = -1,
+    pca_flat = True,
 
 ):
     """
@@ -535,10 +549,11 @@ def log_layer_embeddings(
             raise ValueError(f"Unexpected feature shape for {k}: {feat.shape}")
 
         # pick label mid-slice (features are 2D now)
-        if label_volume.shape[0] !=1:
+        label_volume = np.squeeze(label_volume)
+        if len(label_volume.shape) ==3:
             lbl2d = label_volume[label_volume.shape[0] // 2]  # [H,W]
         else:
-            lbl2d = np.squeeze(label_volume)
+            lbl2d = label_volume 
         lbl2d = lbl2d.astype(np.int8)
 
         # if min==0, then the background is 0
@@ -548,8 +563,9 @@ def log_layer_embeddings(
         H, W, C = feat2d.shape
 
         # PCA→RGB preview
-        rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1, C), (H, W))
-        pca_img_lst.append(rgb_img)
+        if pca_flat:
+            rgb_img = three_pca_as_rgb_image(feat2d.reshape(-1, C), (H, W))
+            pca_img_lst.append(rgb_img)
 
         # Align labels to feature resolution
         zoom_factor = [H / lbl2d.shape[0], W / lbl2d.shape[1]]
@@ -559,12 +575,13 @@ def log_layer_embeddings(
         fg_feats_flat = feat2d[mask]
         fg_label_flat = label_zoomed[mask]
 
-        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat,n_per_class=500)
+        blced_feats, blced_labels = class_balance(fg_feats_flat, fg_label_flat,n_per_class=300)
         tsne_encoded_feats_lst.append(blced_feats)
         tsne_label_lst.append(blced_labels)
         plot_tag_lst.append(k)
 
     # Embedding grid(s)
+    print(f"{valid_img_idx= }")
     umap_tsne_grid_plot(
         tsne_encoded_feats_lst,
         tsne_label_lst,
@@ -575,20 +592,21 @@ def log_layer_embeddings(
         mode=mode,
         tsne_kwargs=tsne_kwargs,
         umap_kwargs=umap_kwargs,
-        filter_label=0,
+        filter_label=None,
         dpi=dpi, ext=ext,
     )
 
     # PCA image grid
-    plot_pca_maps(
-        pca_img_lst,
-        writer=writer,
-        tag=f"pca{valid_img_idx}",
-        step=epoch,
-        ncols=len(pca_img_lst),
-    )
+    if pca_flat:
+        plot_pca_maps(
+            pca_img_lst,
+            writer=writer,
+            tag=f"pca{valid_img_idx}",
+            step=epoch,
+            ncols=len(pca_img_lst),
+        )
 
-    FEATURE_STORE.clear()  # free memory
+    # FEATURE_STORE.clear()  # free memory
 
 
 

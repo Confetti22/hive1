@@ -49,10 +49,6 @@ class SimpleDataset(Dataset):
         roi = tif.imread(self.files[idx])
         roi = np.array(roi).astype(np.float32) 
 
-        # if self.is_norm:
-        #     roi = self.clip_norm(roi,clip_low=self.clip_low,clip_high=self.clip_high)
-        # else:
-        #     roi =self.clip(roi,clip_low=self.clip_low,clip_high=self.clip_high)
         roi=torch.from_numpy(roi)
         roi=torch.unsqueeze(roi,0)
 

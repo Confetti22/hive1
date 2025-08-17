@@ -802,16 +802,22 @@ def report_max_mem():
 
 if __name__ == "__main__":  # simple smoke test
 
-    save_dir = "/home/confetti/data/rm009/boundary_seg/valid_bnd_masks"
-    os.makedirs(save_dir,exist_ok=True)
+    valid_flag = False 
+
+    parent_save_dir = "/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data"
+    write_dir = f"{parent_save_dir}/bnd_masks_valid" if valid_flag else f"{parent_save_dir}/bnd_masks"
+    os.makedirs(write_dir,exist_ok=True)
+    
 
     from pathlib import Path
-    dir_path = Path("/home/confetti/data/rm009/boundary_seg/valid_masks")
-    tif_paths = sorted(p for p in dir_path.iterdir() if p.suffix.lower() in {".tif", ".tiff"})
+    
+    parent_read_dir = "/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data"
+    read_dir = Path(f"{parent_read_dir}/masks_valid") if valid_flag else Path(f"{parent_read_dir}/masks")
+    tif_paths = sorted(p for p in read_dir.iterdir() if p.suffix.lower() in {".tif", ".tiff"})
 
     SAVE_PAIR_WISE_BND  = False 
 
-    for mask_path in tif_paths:
+    for idx, mask_path in enumerate(tif_paths):
         base_name = Path(mask_path).stem
 
         L_raw = tifffile.imread(mask_path)
@@ -848,7 +854,7 @@ if __name__ == "__main__":  # simple smoke test
             pair_paths = save_pairwise_boundaries(
                 pair_masks,
                 base_name=base_name,           # e.g., "Z55200"
-                save_dir=save_dir,
+                save_dir=write_dir,
                 ord2name=ORDERED_NAMES,
                 make_flat_copy=False,
                 compress=True,
@@ -869,8 +875,9 @@ if __name__ == "__main__":  # simple smoke test
             Ls_ord_out = Ls_ord
             Ls_raw_out = Ls_raw       
 
-        tifffile.imwrite(f"{save_dir}/{base_name}_bnd_thick.tif", bnd_out.astype('uint8'))
-        # tifffile.imwrite(f"{save_dir}/{base_name}_ord.tif",       Ls_ord_out.astype('uint8'))
-        # tifffile.imwrite(f"{save_dir}/{base_name}_raw.tif",       Ls_raw_out.astype('uint8'))
+        # tifffile.imwrite(f"{save_dir}/{base_name}_bnd_thick.tiff", bnd_out.astype('uint8'))
+        tifffile.imwrite(f"{write_dir}/{idx+1:04d}.tiff", bnd_out.astype('uint8'))
+        # tifffile.imwrite(f"{save_dir}/{base_name}_ord.tiff",       Ls_ord_out.astype('uint8'))
+        # tifffile.imwrite(f"{save_dir}/{base_name}_raw.tiff",       Ls_raw_out.astype('uint8'))
         print(f"[{base_name}] boundary mask saved (was_2d={was_2d})")
 

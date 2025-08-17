@@ -19,7 +19,7 @@ import numpy as np
 from typing import Tuple
 
 class SegDataset(Dataset):
-    def __init__(self, args,valid=False,use_ratio = 1,bnd=False,bool_mask=False,crop_roi = False):
+    def __init__(self, args,valid=False,use_ratio = 1,bnd_flag=False,recon_target_flag=False,bool_mask=False,crop_input_roi = False):
         """
         for 3d feats volume and corresponding mask
         amount : control the amount of data for training
@@ -40,14 +40,19 @@ class SegDataset(Dataset):
         current_data_path = self.valid_data_path if self.valid else self.data_path
         current_mask_path = self.valid_mask_path if self.valid else self.mask_path
 
-        self.bnd =bnd
+        self.bnd_flag = bnd_flag
+        self.recon_target_flag = recon_target_flag
         self.bool_mask = bool_mask
-        self.crop_roi = crop_roi
-        if bnd:
+        self.crop_input_roi = crop_input_roi
+        if bnd_flag:
             self.bnd_path = args.e5_bnd_path_dir if self.e5 else args.bnd_path_dir
             self.valid_bnd_path = args.e5_valid_bnd_path_dir if self.e5 else args.valid_bnd_path_dir
             current_bnd_path = self.valid_bnd_path if self.valid else self.bnd_path
 
+        if recon_target_flag:
+            self.recon_path = args.e5_recon_target_dir if self.e5 else args.recon_target_dir
+            self.valid_recon_path= args.e5_valid_recon_target_dir if self.e5 else args.valid_recon_target_dir
+            current_recon_path = self.valid_recon_path if self.valid else self.recon_path
         self.files = sorted(
             [os.path.join(current_data_path, fname) 
             for fname in os.listdir(current_data_path) 
@@ -62,7 +67,7 @@ class SegDataset(Dataset):
             key=lambda x: int(os.path.basename(x)[:4])
         )
 
-        if self.bnd:
+        if self.bnd_flag:
             self.bnd_files = sorted(
                 [os.path.join(current_bnd_path, fname) 
                 for fname in os.listdir(current_bnd_path) 
@@ -70,6 +75,15 @@ class SegDataset(Dataset):
                 key=lambda x: int(os.path.basename(x)[:4])
             )
             self.bnd_files  = self.bnd_files[:int(use_ratio*len(self.bnd_files))]
+        
+        if self.recon_target_flag:
+            self.recon_files = sorted(
+                [os.path.join(current_recon_path, fname) 
+                for fname in os.listdir(current_recon_path) 
+                if fname.endswith(('.tif','.tiff'))],
+                key=lambda x: int(os.path.basename(x)[:4])
+            )
+            self.recon_files  = self.recon_files[:int(use_ratio*len(self.recon_files))]
 
 
         self.files  = self.files[:int(use_ratio*len(self.files))]
@@ -134,7 +148,7 @@ class SegDataset(Dataset):
                 arr = pickle.load(f)            # numpy array shape (C,D,H,W)
         elif suffix in {".tif", ".tiff"}:
             arr = tif.imread(fname)            # (D,H,W) or (Z,H,W)
-            if self.crop_roi:
+            if self.crop_input_roi:
                 arr = arr[6:-6]
             arr = np.expand_dims(arr,0) #add channel dim
             
@@ -158,24 +172,38 @@ class SegDataset(Dataset):
         else: # for numerical mask
             mask = mask -1 # class number rearrange from 0 to N-1
 
-        if self.bnd:
+        if self.bnd_flag:
             bnd  = self._load_int_mask_vol(self.bnd_files[idx])   # binary boundary
-            return feats,mask,bnd
+            if self.recon_target_flag:
+                recon_target = tif.imread(self.recon_files[idx])
+                recon_target = np.expand_dims(recon_target,0) #add channel dim
+                recon_target = torch.from_numpy(recon_target).float()
+
+                return feats,mask,bnd,recon_target
+            else:
+                return feats,mask,bnd
         else:
-            return feats,mask
+            if self.recon_target_flag:
+                recon_target = tif.imread(self.recon_files[idx])
+                recon_target = np.expand_dims(recon_target,0) #add channel dim
+                recon_target = torch.from_numpy(recon_target).float()
+
+                return feats,mask,recon_target
+            else:
+                return feats,mask
 
 
 def get_dataset(args,bnd=False,bool_mask=False,crop_roi = False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args, use_ratio=1,bnd=bnd,bool_mask=bool_mask,crop_roi= crop_roi)
+    train_dataset = SegDataset(args, use_ratio=1,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi= crop_roi)
 
     return train_dataset
 
 def get_valid_dataset(args,bnd=False,bool_mask = False,crop_roi = False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args,valid=True,use_ratio =1,bnd=bnd,bool_mask=bool_mask,crop_roi = crop_roi)
+    train_dataset = SegDataset(args,valid=True,use_ratio =0.1,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi = crop_roi)
 
     return train_dataset
 
