@@ -78,8 +78,8 @@ class ComboLoss(nn.Module):
                                                     or α for focal)
     """
     def __init__(self,
-                 weight_ce: float = 1.0,
-                 weight_dice: float = 1.0,
+                 weight_ce: float = 0.33,
+                 weight_dice: float = 0.66,
                  smooth: float = 1e-6,
                  class_weights: torch.Tensor | float | None = None,
                  focal: bool = False,
@@ -129,4 +129,4 @@ class ComboLoss(nn.Module):
             dice_loss    = dice_loss.mean()
 
         # ----- Combo --------------------------------------------------------
-        return self.weight_ce * ce_loss + self.weight_dice * dice_loss
+        return self.weight_ce * ce_loss + self.weight_dice * dice_loss, ce_loss,dice_loss 

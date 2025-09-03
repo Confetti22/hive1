@@ -442,7 +442,7 @@ def umap_tsne_grid_plot(
     if mode_norm == "both":
         nrows = 2
         ncols = num_plots
-        fig, axes = plt.subplots(nrows, ncols, figsize=(8 * ncols, 6 * nrows))
+        fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows))
         # Ensure we can iterate uniformly
         axes_tsne = axes[0, :] if ncols > 1 else [axes[0, 0]]
         axes_umap = axes[1, :] if ncols > 1 else [axes[1, 0]]
@@ -459,7 +459,7 @@ def umap_tsne_grid_plot(
         # single-row figure
         nrows = 1
         ncols = num_plots
-        fig, axes = plt.subplots(nrows, ncols, figsize=(8 * ncols, 6))
+        fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4))
         if num_plots == 1:
             axes = [axes]  # flatten
         # Choose which embeddings we have
@@ -498,6 +498,7 @@ def log_layer_embeddings(
     dpi=300, ext='png',
     valid_img_idx = -1,
     pca_flat = True,
+    comment = "",
 
 ):
     """
@@ -586,7 +587,7 @@ def log_layer_embeddings(
         tsne_encoded_feats_lst,
         tsne_label_lst,
         writer,
-        tag=f"embed_grid{valid_img_idx}",
+        tag=f"embed_grid{valid_img_idx}_{comment}",
         step=epoch,
         tag_list=plot_tag_lst,
         mode=mode,
@@ -601,7 +602,7 @@ def log_layer_embeddings(
         plot_pca_maps(
             pca_img_lst,
             writer=writer,
-            tag=f"pca{valid_img_idx}",
+            tag=f"pca{valid_img_idx}_{comment}",
             step=epoch,
             ncols=len(pca_img_lst),
         )

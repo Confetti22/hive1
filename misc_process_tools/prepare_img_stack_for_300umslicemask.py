@@ -258,7 +258,7 @@ import matplotlib.pyplot as plt
 # %%
 
 ## downsample the roi_volumes(3d) and save the middle_slice(2d) for low-resolution reconstruction
-def process_and_save(input_dir, output_dir, sigma=1.6, stride=2, num_stages=3, crop_size=63):
+def blur_and_down_sample_for_reconstruct_target(input_dir, output_dir, sigma=1.6, stride=2, num_stages=3, crop_size=63):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -280,7 +280,7 @@ def process_and_save(input_dir, output_dir, sigma=1.6, stride=2, num_stages=3, c
         print(f"Saved: {save_path}")
 
 # Example usage
-process_and_save(
+blur_and_down_sample_for_reconstruct_target(
     input_dir="/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/rois_valid",
     output_dir="/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid",
     sigma=1.6,

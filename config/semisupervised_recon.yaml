@@ -1,10 +1,9 @@
 #save_dir
-exp_name : "fine_tune_tv_loss_on_supervised_e100_weight1e4" #exp_name used to distinguish each run
+exp_name : "supervised_recon" #exp_name used to distinguish each run
 exp_save_dir: "outs/cortex_semantic_seg4"
 
-# system
-test_mode: False 
-e5: True 
+# system:
+e5: False 
 device: cuda
 gpu_ids: 0
 num_gpus: 1
@@ -32,18 +31,18 @@ mlp_apply_l2_norm : False
 
 # loss:
 loss_name: l1 # for ae reconstruction loss 
-supervised_loss: True 
-tv_loss: True 
-recon_loss: False 
-tv_loss_weight: 1e4 
-recon_loss_weight: 1
+supervised_loss: False
+tv_loss: False 
+recon_loss: True 
+tv_loss_weigh : 0.001
+recon_loss_weight: 0.008
 
 # trainer:
 trainer_name: 'trainer' #trainer to choose
 save_every: 20 #save frequency
-epochs: 400 
-valid_very_epoch: 1
-save_very_epoch: 1
+epochs: 300 
+valid_very_epoch: 10
+save_very_epoch: 20
 fp16: false 
 
 tsne_emb: True 
@@ -51,7 +50,7 @@ tsne_emb: True
 # solver:
 optimizer: "adam"
 lr_scheduler_name: "decay"
-lr_start: 5e-4
+lr_start: 1e-4
 lr_warmup: 2
 
 # dataset:
@@ -77,8 +76,8 @@ e5_valid_mask_path_dir : "/share/home/shiqiz/data/rm009/boundary_seg/new_boundar
 
 recon_target_dir: '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
 valid_recon_target_dir: '/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'
-e5_recon_target_dir: '/share/home/shiqiz/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
-e5_valid_recon_target_dir :  '/share/home/shiqiz/data/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'
+e5_recon_target_dir: '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois'
+e5_valid_recon_target_dir :  '/share/home/shiqiz/rm009/boundary_seg/new_boundary_seg_data/low_resol_rois_valid'
 
 bnd_path_dir : "/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/bnd_masks"
 valid_bnd_path_dir : "/home/confetti/data/rm009/boundary_seg/new_boundary_seg_data/bnd_masks_valid"

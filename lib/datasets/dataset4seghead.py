@@ -193,17 +193,17 @@ class SegDataset(Dataset):
                 return feats,mask
 
 
-def get_dataset(args,bnd=False,bool_mask=False,crop_roi = False):
+def get_dataset(args,bnd=False,bool_mask=False,use_ratio=1,crop_roi = False,recon_target_flag =False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args, use_ratio=1,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi= crop_roi)
+    train_dataset = SegDataset(args, use_ratio=use_ratio,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi= crop_roi,recon_target_flag =recon_target_flag)
 
     return train_dataset
 
-def get_valid_dataset(args,bnd=False,bool_mask = False,crop_roi = False):
+def get_valid_dataset(args,bnd=False,bool_mask = False,use_ratio =1,crop_roi = False,recon_target_flag =False):
 
     # === Get Dataset === #
-    train_dataset = SegDataset(args,valid=True,use_ratio =0.1,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi = crop_roi)
+    train_dataset = SegDataset(args,valid=True,use_ratio=use_ratio,bnd_flag=bnd,bool_mask=bool_mask,crop_input_roi = crop_roi,recon_target_flag =recon_target_flag)
 
     return train_dataset
 

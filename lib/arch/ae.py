@@ -376,9 +376,9 @@ class BaseAutoEncoderND_1(nn.Module):
                                  pad_mode, act_mode, norm_mode, block_type)
 
     def forward(self, x):
-        x1 = self.encoder(x)
-        x2 = self.decoder(x1)
-        return x1,x2
+        bottle_neck = self.encoder(x)
+        cnn_out = self.decoder(bottle_neck)
+        return bottle_neck,cnn_out
 
 class AutoEncoder3D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
@@ -557,7 +557,7 @@ class semantic_seg(nn.Module):
     def forward(self, x):
         bottle_neck,cnn_out = self.cnn_module(x) # B*C*H*W --> B*H*W*C --> (B*H*W)*C
         mlp_out = self.mlp_module(cnn_out)
-        return bottle_neck,cnn_out,mlp_out
+        return bottle_neck,mlp_out
 
 def build_semantic_seg_model(args):
     kwargs = {

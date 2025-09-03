@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-class Loss(nn.Module):
+class L1Loss(nn.Module):
     def __init__(self, args):
         super().__init__()
 
@@ -16,7 +16,7 @@ class Loss(nn.Module):
         return loss
 
 def get_loss(args):
-    return Loss(args)
+    return L1Loss(args)
 
 
 
