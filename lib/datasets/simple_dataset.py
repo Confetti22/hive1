@@ -68,6 +68,9 @@ def get_valid_dataset(args):
 
     return train_dataset
 
+
+
+
 if __name__ =="__main__":
     import yaml
     cfg_pth="/home/confetti/e5_workspace/brain_region_unet_contrastive_encoder/config/3dunet_brain_region_contrastive_learing.yaml"

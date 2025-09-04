@@ -128,8 +128,8 @@ class Trainer:
                     input_data = input_data.detach().cpu().numpy()
                     input_data = np.squeeze(input_data)
 
-                    num=input_data.shape[0]
-                    for id in [0,1,2]:
+                    valid_sample_idxes = [0,1,2]
+                    for id in valid_sample_idxes:
                         x = input_data[id]
                         re_x = preds[id]
 

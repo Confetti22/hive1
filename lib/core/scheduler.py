@@ -34,3 +34,9 @@ class WarmupCosineLR(_LRScheduler):
         cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
         return [base_lr * cosine_factor for base_lr in self.base_lrs]
 
+
+def get_scheduler(optimizer, args):
+    schedulers ={
+        'cosine':  WarmupCosineLR(optimizer,args.warmup_epochs,args.max_epochs),
+    }
+    return schedulers.get(args.lr_scheduler, "Invalid Optimizer" ) 

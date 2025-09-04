@@ -298,10 +298,14 @@ class DecoderND_1(nn.Module):
     """
     Decoder with upsampling via ConvTranspose (stride=2), no padding anywhere.
     All stages (including the final out stage) are appended to self.up_layers.
+    
+    update 2025/09/03 add parameter:last_layer_act='none',  controls whether to use activation at the last layer 
+    (for raw input image reconstruciton task, a linear layer is better)
+
     """
     def __init__(self, out_channel, filters, kernel_size, dims=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn',
-                 block_type='double',output_padding =0):
+                 block_type='double',output_padding =0,last_layer_act='elu'):
         super().__init__()
         self.dim = dims
         self.depth = len(filters)
@@ -340,7 +344,11 @@ class DecoderND_1(nn.Module):
                 dim=dims,
                 trans=True,            # first conv is transposed conv
                 output_padding=1,
-                shared_kwargs=self.shared_kwargs
+                shared_kwargs = {
+                    'pad_mode': pad_mode,
+                    'act_mode': last_layer_act,
+                    'norm_mode': norm_mode}
+
             )
         self.up_layers.append(block)
     def forward(self, x):
@@ -389,11 +397,14 @@ class AutoEncoder3D_1(BaseAutoEncoderND_1):
         super().__init__(dims=3 ,**kwargs)
 
 
-
-
 class AutoEncoder2D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
         super().__init__(dimension=2, **kwargs)
+
+class AutoEncoder2D_1(BaseAutoEncoderND_1):
+    def __init__(self, **kwargs):
+        super().__init__(dims=2 ,**kwargs)
+
 
 
 # --------------------------------------------
@@ -466,15 +477,17 @@ class ComposedModel(nn.Module):
         return x
 
 
+"ae2, ae3, with more complex layer naming, "
+"ae2_1, ae3_1, layers' name are concise only with donw/up"
 
 MODEL_MAP = {
     'ae2': AutoEncoder2D,
     'ae3': AutoEncoder3D,
     'ae3_1': AutoEncoder3D_1,
+    'ae2_1': AutoEncoder2D_1,
     'encoder':EncoderND,
+    'encoder_1':EncoderND_1,
 }
-
-
 
 
 def build_autoencoder_model(args):
@@ -482,8 +495,8 @@ def build_autoencoder_model(args):
     model_arch = args.model_name
     assert model_arch in MODEL_MAP.keys()
     kwargs = {
-        'in_channel': args.in_planes,
-        'out_channel': args.out_planes,
+        'in_channel': args.in_channel,
+        'out_channel': args.out_channel,
         'filters': args.filters,
         'kernel_size': args.kernel_size,
         'pad_mode': args.pad_mode,
@@ -512,7 +525,11 @@ def build_encoder_model(args,dims):
         'last_encoder': args.last_encoder,
     }
 
-    model = EncoderND(dimension=dims,**kwargs)
+    model = MODEL_MAP[args.encoder_model_name](**kwargs)
+    print('model: ', model.__class__.__name__)
+
+    return model
+
 
     return model 
 

@@ -1,0 +1,132 @@
+run_id: "exp001"             # will create runs/exp001/*
+dims: 3
+paths:
+  input_image: "/home/confetti/data/rm009/rm009_roi/z16176_z16300C4_d124_h3500_w5250.tif"
+  level: 0   # level and channel are used if input is .ims file
+  channel: 1
+
+  output_root: "runs"
+
+  #for ae training
+  ae_train_dir: "ae_train"         # buid a dir runs/<run_id>/data/<ae_train_dir>
+  ae_test_dir:  "ae_test"           # build a dir runs/<run_id>/data/<ae_test_dir>
+  ae_out_dir: "ae_out"              # build a dir runs/<run_id>/<ae_out_dir>
+  ae_weight_path: "none"  #model_weight path, will be used for following steps, will be set automatically after previsous training finished  
+  
+  #for feature extraction
+  zarr_name: "ae_feats.zarr"
+
+  #for contrastive training
+  contrastive_out_dir: "contrastive_out"   # build a dir runs/<run_id>/contrastive_out_dir>
+  mlp_weight_path: "none" 
+
+crop:
+  rois_size: [64,64,64] # size of each roi
+  train_split: 0.8  # (0-split )z range will be used in train, and (split,1)z range for test if dims=3, else, along the y axis split the dataset
+  split_axis: 1 # 0=Z, 1=Y, 2=X 
+  entropy_thres: 2.7  # 2.7 for 4um macaque nissle channel imaging
+  amount: 2048  #will sample amount train rois and 0.2*amount test rois
+  sample_range: "none" 
+
+autoencoder:
+  model_name: ae3_1
+  encoder_model_name: encoder_1 # the same arch with encoder in ae, used for step2 feature extraction
+  architecture: ae
+  block_type:      # block_type can be  'double' 'triple' or empty(will use one conv each layer)
+  filters: [24,32,48]  # filters number can not be the same consecutively
+  kernel_size: [3,3,3]
+  in_channel: 1
+  out_channel: 1  #for last channel of decoder, set to 1 for auto input regression
+  pad_mode: 'reflect'
+  act_mode: 'elu'
+  norm_mode: 'none'
+  downsample_strategy: 'conv_stride'
+  last_layer_act: 'none' #set none for  auto input regression
+
+  #dataset:
+  dataset_name: 'fixed_dataset'
+  num_workers: 0
+
+  # loss:
+  loss_name: l1 # for ae reconstruction loss
+
+  # trainer:
+  trainer_name: 'trainer' #trainer to choose
+  save_every: 50 #save frequency
+  epoch: 1000
+  batch_size: 512
+  fp16: false 
+  start_epoch: 0
+
+  # solver:
+  optimizer: "adam"
+  lr_scheduler: "cosine"
+  weight_decay: 0.01
+  lr_start: 5e-4
+  lr_end: 5e-6
+  lr_warmup: 10
+
+feature_extract:
+
+  # Extract from the WHOLE input image using the trained encoder
+  batch_size: 64
+  global_offset:  [3392,2512,7008] 
+  whole_volume_size:  [6784,5000,4000] 
+  region_size:  [64,1536,1536] 
+  roi_size:  [64,64,64] 
+  roi_stride:  [16,16,16] 
+
+contrastive_mlp:
+  #_______for mlp_encoder_____
+  mlp_filters: [96,48,24,12]
+  avg_pool_size: [8,8,8] 
+  avg_pool_padding: False
+  last_encoder: False
+
+  # trainer:
+  save_every: 50 #save frequency
+  epoch: 1000
+  num_pairs: 16384 
+  batch_size: 2048 
+  start_epoch: 0
+  shuffle_very_epoch: 20 
+  valid_very_epoch: 50
+  save_very_epoch: 50
+  pos_weight_ratio: 2
+  d_near: 6 # should be decided on input resolution  
+
+  # solver:
+  optimizer: "adam"
+  lr_scheduler: "cosine"
+  weight_decay: 0.01
+  lr_start: 5e-4
+  lr_end: 5e-6
+  lr_warmup: 10
+
+
+exec:
+  use_slurm: false              # true to submit steps via sbatch
+  sbatch:
+    partition: "compute"
+    nodelist: "c003"
+    gpus: 1
+    cpus_per_task: 8
+    mem: "20G"
+    time: "24:00:00"
+    extra_args: ""             # e.g. "--qos=high"
+
+
+# show steps
+# python pipeline.py --list-steps
+
+# run just the autoencoder (will check tiles exist first)
+# python pipeline.py --cfg configs/pipeline.yaml --step train_ae
+
+# run just feature extraction (will check AE ckpt + input image)
+# python pipeline.py --cfg configs/pipeline.yaml --step extract
+
+# force re-run only one step
+# python pipeline.py --cfg configs/pipeline.yaml --step train_mlp --force
+
+# dry-run (print commands without executing)
+# python pipeline.py --cfg configs/pipeline.yaml --step crop --dry
