@@ -74,15 +74,12 @@ class Trainer:
 
 
         metric_logger = MetricLogger(delimiter="  ")
-        header = 'Epoch: [{}/{}]'.format(epoch, self.args.epoch)
+        header = 'Epoch: [{}/{}]'.format(epoch, self.args.epoch_num)
 
         for it, input_data in enumerate(metric_logger.log_every(self.train_gen, 1, header)):
 
             # === Global Iteration === #
             it = len(self.train_gen) * epoch + it
-
-            for i, param_group in enumerate(self.optimizer.param_groups):
-                param_group["lr"] = lr_schedule.get_last_lr()[0] 
 
             # === Inputs === #
             input_data = input_data.cuda(non_blocking=True) 
@@ -116,6 +113,7 @@ class Trainer:
             # === Logging === #
             torch.cuda.synchronize()
             metric_logger.update(loss=loss.item())
+            metric_logger.update(lr=lr_schedule.get_last_lr()[0])
 
             if self.args.main:
                 self.loss_writer(metric_logger.meters['loss'].value, it)
@@ -150,8 +148,6 @@ class Trainer:
                         merged = (merged - merged.min()) / (merged.max() - merged.min())
 
                         self.writer.add_image('x and re_x ',merged,it,dataformats='HW')
-
-
         metric_logger.synchronize_between_processes()
         print("Averaged stats:", metric_logger)
     
@@ -224,25 +220,21 @@ class Trainer:
         self.load_if_available()
 
 
-        from lib.core.scheduler import WarmupCosineLR
-
-        lr_schedule= WarmupCosineLR(self.optimizer,
-                            warmup_epochs=20,
-                            max_epochs=self.args.epoch)
-
+        from lib.core.scheduler import get_scheduler 
+        lr_schedule= get_scheduler(self.optimizer, self.args)
 
         # === training loop === #
-        for epoch in range(self.start_epoch, self.args.epoch):
+        for epoch in range(self.start_epoch, self.args.epoch_num):
 
             self.train_gen.sampler.set_epoch(epoch)
 
 
-            save_recon_img_flag = ( (epoch +1 ) %self.args.save_every==0)
+            save_recon_img_flag = ( (epoch ) %self.args.save_every==0)
             self.train_one_epoch(epoch, lr_schedule,save_recon_img_flag,MSE_loss=True)
             lr_schedule.step()
 
             # === eval and save model === #
-            if self.args.main and (epoch + 1)% self.args.save_every == 0:
+            if self.args.main and (epoch )% self.args.save_every == 0:
                 self.valid(epoch)
                 self.save(epoch)
             

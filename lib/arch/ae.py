@@ -9,7 +9,7 @@ def get_norm_nd(norm: str, out_channels: int, dim: int = 3, bn_momentum: float =
     Args:
         norm (str): One of ['bn', 'sync_bn', 'in', 'gn', 'none'].
         out_channels (int): Number of output channels.
-        dim (int): Dimension of data (1, 2, or 3).
+        dim (int): dims of data (1, 2, or 3).
         bn_momentum (float): Momentum for BatchNorm or SyncBatchNorm.
 
     Returns:
@@ -17,7 +17,7 @@ def get_norm_nd(norm: str, out_channels: int, dim: int = 3, bn_momentum: float =
     """
     norm = norm.lower()
     assert norm in ["bn", "sync_bn", "in", "gn", "none"], f"Unknown normalization type: {norm}"
-    assert dim in [1, 2, 3], f"Unsupported dimension: {dim}"
+    assert dim in [1, 2, 3], f"Unsupported dims: {dim}"
 
     norm_layers = {
         "bn": [nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d],
@@ -130,15 +130,15 @@ def make_block(in_ch, out_ch, ks, stride, block_type, dim, trans, shared_kwargs,
 #  Base AutoEncoder Class (ND)
 # --------------------------------------------
 class EncoderND(nn.Module):
-    def __init__(self, in_channel, filters, kernel_size, dimension=3,
+    def __init__(self, in_channel, filters, kernel_size, dims=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double',avg_pool_size = None, avg_pool_padding=False,last_encoder=True):
         super().__init__()
-        self.dim = dimension
+        self.dim = dims
         self.depth = len(filters)
         self.avg_pool_size = avg_pool_size
         self.avg_pool_padding = avg_pool_padding
 
-        Conv = nn.Conv3d if dimension == 3 else nn.Conv2d
+        Conv = nn.Conv3d if dims == 3 else nn.Conv2d
 
         self.shared_kwargs = {
             'pad_mode': pad_mode,
@@ -148,13 +148,13 @@ class EncoderND(nn.Module):
 
         k = kernel_size[0]
         p = int((k - 1) // 2)
-        self.conv_in = conv_nd_norm_act(in_channel, filters[0], k, 2, p, dim=dimension, **self.shared_kwargs)
+        self.conv_in = conv_nd_norm_act(in_channel, filters[0], k, 2, p, dim=dims, **self.shared_kwargs)
 
         self.down_layers = nn.ModuleList()
         for i in range(self.depth - 1):
             ks = kernel_size[min(i + 1, len(kernel_size) - 1)]
             p = int((ks - 1) // 2)
-            block = make_block(filters[i], filters[i + 1], ks, 2, p, block_type, dim=dimension, trans=False,
+            block = make_block(filters[i], filters[i + 1], ks, 2, p, block_type, dim=dims, trans=False,
                                shared_kwargs=self.shared_kwargs)
             self.down_layers.append(block)
 
@@ -184,13 +184,13 @@ class EncoderND(nn.Module):
 
 
 class DecoderND(nn.Module):
-    def __init__(self, out_channel, filters, kernel_size, dimension=3,
+    def __init__(self, out_channel, filters, kernel_size, dims=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double'):
         super().__init__()
-        self.dim = dimension
+        self.dim = dims
         self.depth = len(filters)
 
-        ConvTrans = nn.ConvTranspose3d if dimension == 3 else nn.ConvTranspose2d
+        ConvTrans = nn.ConvTranspose3d if dims == 3 else nn.ConvTranspose2d
 
         self.shared_kwargs = {
             'pad_mode': pad_mode,
@@ -203,7 +203,7 @@ class DecoderND(nn.Module):
             ks = kernel_size[i + 1]
             p = int((ks - 1) // 2)
             block = make_block(filters[i + 1], filters[i], ks, stride=2, padding=p,
-                               block_type=block_type, dim=dimension, trans=True,
+                               block_type=block_type, dim=dims, trans=True,
                                shared_kwargs=self.shared_kwargs)
             self.up_layers.append(block)
 
@@ -305,7 +305,7 @@ class DecoderND_1(nn.Module):
     """
     def __init__(self, out_channel, filters, kernel_size, dims=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn',
-                 block_type='double',output_padding =0,last_layer_act='elu'):
+                 block_type='double',output_padding =0,last_layer_act='none'):
         super().__init__()
         self.dim = dims
         self.depth = len(filters)
@@ -361,12 +361,12 @@ class DecoderND_1(nn.Module):
     
 
 class BaseAutoEncoderND(nn.Module):
-    def __init__(self, in_channel, out_channel, filters, kernel_size, dimension=3,
+    def __init__(self, in_channel, out_channel, filters, kernel_size, dims=3,
                  pad_mode='reflect', act_mode='elu', norm_mode='gn', block_type='double'):
         super().__init__()
-        self.encoder = EncoderND(in_channel, filters, kernel_size, dimension,
+        self.encoder = EncoderND(in_channel, filters, kernel_size, dims,
                                  pad_mode, act_mode, norm_mode, block_type)
-        self.decoder = DecoderND(out_channel, filters, kernel_size, dimension,
+        self.decoder = DecoderND(out_channel, filters, kernel_size, dims,
                                  pad_mode, act_mode, norm_mode, block_type)
 
     def forward(self, x):
@@ -376,21 +376,25 @@ class BaseAutoEncoderND(nn.Module):
 
 class BaseAutoEncoderND_1(nn.Module):
     def __init__(self, in_channel, out_channel, filters, kernel_size, dims,
-                 pad_mode='reflect', act_mode='elu', norm_mode='none', block_type='single',downsample_strategy='max_pool'):
+                 pad_mode='reflect', act_mode='elu', norm_mode='none', block_type='single',downsample_strategy='max_pool',last_layer_act = 'none' ,return_bottle_neck=True):
         super().__init__()
         self.encoder = EncoderND_1(in_channel, filters, kernel_size, dims,
                                  pad_mode, act_mode, norm_mode, block_type,downsample_strategy)
         self.decoder = DecoderND_1(out_channel, filters, kernel_size, dims,
-                                 pad_mode, act_mode, norm_mode, block_type)
+                                 pad_mode, act_mode, norm_mode, block_type,last_layer_act=last_layer_act)
+        self.return_bottle_neck = return_bottle_neck
 
     def forward(self, x):
         bottle_neck = self.encoder(x)
         cnn_out = self.decoder(bottle_neck)
-        return bottle_neck,cnn_out
+        if self.return_bottle_neck:
+            return bottle_neck,cnn_out
+        else:
+            return cnn_out
 
 class AutoEncoder3D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
-        super().__init__(dimension=3, **kwargs)
+        super().__init__(dims=3, **kwargs)
 
 class AutoEncoder3D_1(BaseAutoEncoderND_1):
     def __init__(self, **kwargs):
@@ -399,7 +403,7 @@ class AutoEncoder3D_1(BaseAutoEncoderND_1):
 
 class AutoEncoder2D(BaseAutoEncoderND):
     def __init__(self, **kwargs):
-        super().__init__(dimension=2, **kwargs)
+        super().__init__(dims=2, **kwargs)
 
 class AutoEncoder2D_1(BaseAutoEncoderND_1):
     def __init__(self, **kwargs):
@@ -491,9 +495,15 @@ MODEL_MAP = {
 
 
 def build_autoencoder_model(args):
+    """Build an autoencoder with variant-specific kwargs.
+
+    ae2/ae3 use the classic BaseAutoEncoderND; ae2_1/ae3_1 use
+    BaseAutoEncoderND_1 and require `downsample_strategy`.
+    """
 
     model_arch = args.model_name
-    assert model_arch in MODEL_MAP.keys()
+    assert model_arch in MODEL_MAP.keys(), f"Unknown model_name: {model_arch}"
+
     kwargs = {
         'in_channel': args.in_channel,
         'out_channel': args.out_channel,
@@ -505,7 +515,15 @@ def build_autoencoder_model(args):
         'block_type': args.block_type,
     }
 
-    model = MODEL_MAP[args.model_name](**kwargs)
+    # Only the *_1 variants accept/need downsample_strategy
+    if model_arch in ('ae2_1', 'ae3_1') and hasattr(args, 'downsample_strategy'):
+        kwargs['downsample_strategy'] = args.downsample_strategy
+    if model_arch in ('ae2_1', 'ae3_1') and hasattr(args, 'last_layer_act'):
+        kwargs['last_layer_act'] = args.last_layer_act
+    if model_arch in ('ae2_1', 'ae3_1') and hasattr(args, 'return_bottle_neck'):
+        kwargs['return_bottle_neck'] = args.return_bottle_neck
+
+    model = MODEL_MAP[model_arch](**kwargs)
     print('model: ', model.__class__.__name__)
 
     return model
@@ -705,8 +723,6 @@ def load_compose_encoder_dict(cmodel,cnn_ckpt_pth,mlp_ckpt_pth=None,mlp_weight_d
     # load_mlpencoder_dict(mlp,mlp_ckpt_pth)
     load_mlp_ckpt_to_convmlp(mlp,mlp_ckpt_pth,mlp_weight_dict,dims)
     
-
-
 
 
 

@@ -42,6 +42,7 @@ autoencoder:
   norm_mode: 'none'
   downsample_strategy: 'conv_stride'
   last_layer_act: 'none' #set none for  auto input regression
+  return_bottle_neck: False
 
   #dataset:
   dataset_name: 'fixed_dataset'
@@ -53,7 +54,7 @@ autoencoder:
   # trainer:
   trainer_name: 'trainer' #trainer to choose
   save_every: 50 #save frequency
-  epoch: 1000
+  epoch_num: 1000
   batch_size: 512
   fp16: false 
   start_epoch: 0
@@ -64,7 +65,7 @@ autoencoder:
   weight_decay: 0.01
   lr_start: 5e-4
   lr_end: 5e-6
-  lr_warmup: 10
+  warmup_epochs: 10
 
 feature_extract:
 
@@ -105,7 +106,7 @@ contrastive_mlp:
 
 
 exec:
-  use_slurm: false              # true to submit steps via sbatch
+  use_slurm: False              # true to submit steps via sbatch
   sbatch:
     partition: "compute"
     nodelist: "c003"
@@ -117,16 +118,16 @@ exec:
 
 
 # show steps
-# python pipeline.py --list-steps
+# python pipeline.py -list_steps
 
 # run just the autoencoder (will check tiles exist first)
-# python pipeline.py --cfg configs/pipeline.yaml --step train_ae
+# python pipeline.py -cfg config/pipeline.yaml -step train_ae
 
 # run just feature extraction (will check AE ckpt + input image)
-# python pipeline.py --cfg configs/pipeline.yaml --step extract
+# python pipeline.py -cfg config/pipeline.yaml -step extract
 
 # force re-run only one step
-# python pipeline.py --cfg configs/pipeline.yaml --step train_mlp --force
+# python pipeline.py -cfg config/pipeline.yaml -step train_mlp -force
 
 # dry-run (print commands without executing)
-# python pipeline.py --cfg configs/pipeline.yaml --step crop --dry
+# python pipeline.py -cfg config/pipeline.yaml -step crop -dry

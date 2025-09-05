@@ -2,18 +2,18 @@
 # -------------------
 # 1) Put your pipeline.yaml somewhere (e.g., configs/pipeline.yaml) — you already have it.
 # 2) Run end‑to‑end locally:
-#    python pipeline.py --cfg configs/pipeline.yaml
+#    python pipeline.py -cfg configs/pipeline.yaml
 # 3) Run a single step (with dependency checks):
-#    python pipeline.py --cfg configs/pipeline.yaml --step crop
-#    python pipeline.py --cfg configs/pipeline.yaml --step train_ae
-#    python pipeline.py --cfg configs/pipeline.yaml --step extract
-#    python pipeline.py --cfg configs/pipeline.yaml --step train_mlp
+#    python pipeline.py -cfg configs/pipeline.yaml -step crop
+#    python pipeline.py -cfg configs/pipeline.yaml -step train_ae
+#    python pipeline.py -cfg configs/pipeline.yaml -step extract
+#    python pipeline.py -cfg configs/pipeline.yaml -step train_mlp
 # 4) Slurm mode (submit each step via sbatch; uses exec.sbatch in YAML):
-#    python pipeline.py --cfg configs/pipeline.yaml --use-slurm
+#    python pipeline.py -cfg configs/pipeline.yaml -use_slurm
 # 5) Utilities:
-#    --list-steps   : print available steps
-#    --force        : re-run a step even if its outputs exist
-#    --dry          : print what would run without executing
+#    -list_steps   : print available steps
+#    -force        : re-run a step even if its outputs exist
+#    -dry          : print what would run without executing
 #
 # Directory layout (automatically created):
 #   runs/<run_id>/
@@ -75,12 +75,13 @@ def load_cfg(cfg_path: str) -> dict:
     paths = cfg['paths']
     cfg['_run'] = {
         'root': root,
+        'run_id': run_id,
         'data_dir': root / 'data',
         'ae_train_dir': root / 'data' / paths['ae_train_dir'],
         'ae_test_dir': root / 'data' / paths['ae_test_dir'],
         'ae_out_dir': root / paths['ae_out_dir'],
         'contrastive_out_dir': root / paths['contrastive_out_dir'],
-        'zarr_path': root / cfg['feature_extract'].get('zarr_name', cfg['paths']['zarr_name'] if 'zarr_name' in cfg['paths'] else 'ae_feats.zarr')
+        'zarr_path': root /cfg['paths']['zarr_name'], 
     }
     return cfg
 
@@ -139,7 +140,7 @@ def build_cmd(step: str, cfg_path: str) -> list:
     }
     if step not in mapping:
         raise SystemExit(f"Unknown step: {step}")
-    return [sys.executable, mapping[step], '--cfg', cfg_path]
+    return [sys.executable, mapping[step], '-cfg', cfg_path]
 
 
 def run_local(cmd: list, dry: bool):
@@ -181,13 +182,13 @@ def run_slurm(cmd: list, cfg: dict, dry: bool):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', required=True,default='config/pipeline.yaml',help='Path to pipeline.yaml')
+    parser.add_argument('-cfg', required=True,default='config/pipeline.yaml',help='Path to pipeline.yaml')
     steps_all = ['crop','train_ae','extract','train_mlp']
-    parser.add_argument('--step', choices=steps_all, help='Run only one step')
-    parser.add_argument('--force', action='store_true', help='Re-run even if outputs exist')
-    parser.add_argument('--dry', action='store_true', help='Print commands without executing')
-    parser.add_argument('--list-steps', action='store_true', help='List available steps')
-    parser.add_argument('--use-slurm', action='store_true', help='Override YAML and submit via sbatch')
+    parser.add_argument('-step', choices=steps_all, help='Run only one step')
+    parser.add_argument('-force', action='store_true', help='Re-run even if outputs exist')
+    parser.add_argument('-dry', action='store_true', help='Print commands without executing')
+    parser.add_argument('-list_steps', action='store_true', help='List available steps')
+    parser.add_argument('-use_slurm', action='store_true', help='Override YAML and submit via sbatch')
     args = parser.parse_args()
 
     if args.list_steps:
@@ -202,7 +203,7 @@ def main():
 
     for step in steps:
         if not args.force and step_already_done(step, cfg):
-            print(f"[SKIP] {step} is already done. Use --force to re-run.")
+            print(f"[SKIP] {step} is already done. Use -force to re-run.")
             continue
         if step != 'crop':
             dep_checks(step, cfg)

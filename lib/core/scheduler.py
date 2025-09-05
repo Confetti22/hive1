@@ -37,6 +37,6 @@ class WarmupCosineLR(_LRScheduler):
 
 def get_scheduler(optimizer, args):
     schedulers ={
-        'cosine':  WarmupCosineLR(optimizer,args.warmup_epochs,args.max_epochs),
+        'cosine':  WarmupCosineLR(optimizer,args.warmup_epochs,args.epoch_num),
     }
     return schedulers.get(args.lr_scheduler, "Invalid Optimizer" ) 

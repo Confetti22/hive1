@@ -41,7 +41,7 @@ def parse_args():
                                             help='Start TensorBoard')
     parser.add_argument('-gpus', type=str, default="0",
                                             help='GPUs list, only works if not on slurm')
-    parser.add_argument('--cfg','-cfg', type=str, help='Path to YAML config (pipeline.yaml or legacy flat YAML)',
+    parser.add_argument('-cfg', type=str, help='Path to YAML config (pipeline.yaml or legacy flat YAML)',
                         default='config/pipeline.yaml')
 
     # === Trainer === #
@@ -86,49 +86,50 @@ def parse_args():
 
         if cfg and 'autoencoder' in cfg and 'paths' in cfg and 'run_id' in cfg:
             ae = cfg['autoencoder']
-            R = cfg.get('_run', {})
+            R = cfg['_run']
 
             # Core training hyper-parameters mapped from pipeline.yaml
             mapped = {
                 # I/O (use derived paths from pipeline.load_cfg)
-                'out': str(R.get('ae_out_dir')),
-                'exp_name': ae.get('exp_name'),
+                'out': str(R['ae_out_dir']),
+                'exp_name': R['run_id'],
                 # dataset paths for SimpleDataset
-                'data_path_dir': str(R.get('ae_train_dir')),
-                'valid_data_path_dir': str(R.get('ae_test_dir')),
+                'data_path_dir': str(R['ae_train_dir']),
+                'valid_data_path_dir': str(R['ae_test_dir']),
                 # dataset + model selections
-                'model_name': ae.get('model_name'),
-                'dataset_name': ae.get('dataset_name'),
-                'architecture': ae.get('architecture'),
-                'loss_name': ae.get('loss_name'),
-                'trainer_name': ae.get('trainer_name'),
+                'model_name': ae['model_name'],
+                'dataset_name': ae['dataset_name'],
+                'architecture': ae['architecture'],
+                'loss_name': ae['loss_name'],
+                'trainer_name': ae['trainer_name'],
                 # model hyperparams
-                'in_channel': int(ae.get('in_channel')),
-                'out_channel': int(ae.get('out_channel')),
-                'filters': ae.get('filters'),
-                'kernel_size': ae.get('kernel_size'),
-                'pad_mode': ae.get('pad_mode'),
-                'act_mode': ae.get('act_mode'),
-                'norm_mode': ae.get('norm_mode'),
-                'block_type': ae.get('block_type'),
-                'downsample_strategy': ae.get('downsample_strategy'),
+                'in_channel': int(ae['in_channel']),
+                'out_channel': int(ae['out_channel']),
+                'filters': ae['filters'],
+                'kernel_size': ae['kernel_size'],
+                'pad_mode': ae['pad_mode'],
+                'act_mode': ae['act_mode'],
+                'norm_mode': ae['norm_mode'],
+                'block_type': ae['block_type'],
+                'downsample_strategy': ae['downsample_strategy'],
                 # Optional decoder last layer activation control for AE_1 variants
-                'last_layer_act': ae.get('last_layer_act'),
+                'last_layer_act': ae['last_layer_act'],
+                'return_bottle_neck': ae['return_bottle_neck'],
                 # training knobs
-                'epoch': int(ae.get('epoch')),
-                'save_every': int(ae.get('save_every')),
-                'batch_per_gpu': int(ae.get('batch_size')),
-                'fp16': bool(ae.get('fp16')),
-                'start_epoch': int(ae.get('start_epoch')),
+                'epoch_num': int(ae['epoch_num']),
+                'save_every': int(ae['save_every']),
+                'batch_per_gpu': int(ae['batch_size']),
+                'fp16': bool(ae['fp16']),
+                'start_epoch': int(ae['start_epoch']),
                 # solver
-                'optimizer': ae.get('optimizer'),
-                'lr_scheduler': ae.get('lr_scheduler'),
-                'weight_decay': as_float_if_str(ae.get('weight_decay')),
-                'lr_start': as_float_if_str(ae.get('lr_start')),
-                'lr_end': as_float_if_str(ae.get('lr_end')),
-                'lr_warmup': int(ae.get('lr_warmup')),
+                'optimizer': ae['optimizer'],
+                'lr_scheduler': ae['lr_scheduler'],
+                'weight_decay': as_float_if_str(ae['weight_decay']),
+                'lr_start': as_float_if_str(ae['lr_start']),
+                'lr_end': as_float_if_str(ae['lr_end']),
+                'warmup_epochs': int(ae['warmup_epochs']),
                 # misc defaults used by training code
-                'num_workers': int(ae.get('num_workers',4)),
+                'num_workers': int(ae['num_workers']),
                 'shuffle': True,
             }
 
@@ -170,7 +171,7 @@ def main():
     args = parse_args()
     args.port = random.randint(49152,65535)
     # Persist the effective config for reproducibility
-    cfg_save_path = f"{args.out}/logs/{args.exp_name}"
+    cfg_save_path = f"{args.out}/logs"
     os.makedirs(cfg_save_path, exist_ok=True)
     try:
         shutil.copy2(args.cfg, f"{cfg_save_path}/cfg.yaml")
@@ -211,7 +212,7 @@ def main():
         # After training completes locally, materialize a pipeline-friendly checkpoint
         # as <ae_out_dir>/best.ckpt so the orchestrator can detect completion.
         try:
-            weights_dir = Path(args.out) / 'weights' / args.exp_name
+            weights_dir = Path(args.out) / 'weights' 
             latest = sorted(weights_dir.glob('Epoch_*.pth'))
             if latest:
                 best_ckpt = Path(args.out) / 'best.ckpt'
@@ -230,6 +231,8 @@ def train(gpu, args):
     # === DATA === #
     # from lib.datasets.visor_3d_dataset import get_dataset
     get_dataset_fn = getattr(__import__("lib.datasets.{}".format(args.dataset_name), fromlist=["get_dataset"]), "get_dataset")
+    #todo : verify the args.data_path_dir is correct
+    print(f"Loading data from {args.data_path_dir} and {args.valid_data_path_dir}")
     train_dataset = get_dataset_fn(args.data_path_dir)
     train_sampler = DistributedSampler(train_dataset, shuffle=args.shuffle, num_replicas = args.world_size, rank = args.rank, seed = 31)
     train_loader = DataLoader(dataset=train_dataset, 
